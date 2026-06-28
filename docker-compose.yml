@@ -6,8 +6,11 @@ services:
     image: career-ops:local
     container_name: career-ops
     working_dir: /app
-    # Long-running shell so `docker compose exec` is instant.
-    command: ["tail", "-f", "/dev/null"]
+    # Run as root so HOME=/root (where the mounted Claude auth lands) is writable.
+    user: "root"
+    # Main process is the ingest server (the bridge endpoint). It keeps the
+    # container up, so `docker compose exec` / `./cops` still work as before.
+    command: ["npm", "run", "ingest"]
     init: true
     # Mount whole project so edits on host are visible inside the container.
     # node_modules is kept inside the image to avoid host/container ABI mismatch
@@ -15,12 +18,20 @@ services:
     volumes:
       - .:/app
       - career-ops-node-modules:/app/node_modules
+      # Share the host's Claude Code auth so in-container `claude -p` uses the
+      # same subscription session. These must exist on the host first
+      # (run `claude` + `/login` once before `up`).
+      - ${HOME}/.claude:/root/.claude
+      - ${HOME}/.claude.json:/root/.claude.json
     environment:
       - NODE_ENV=development
       - PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
-      # Forward common API keys if set on host. Empty values are ignored.
+      - HOME=/root
+      # Bearer token the ingest endpoint requires. Set it in .env.
+      - CAREEROPS_INGEST_TOKEN=${CAREEROPS_INGEST_TOKEN:-}
+      # ANTHROPIC_API_KEY is intentionally NOT forwarded: claude -p must use the
+      # mounted ~/.claude subscription token, and an env key would override it.
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
     # Chromium needs a larger /dev/shm than the default 64M.
     shm_size: "1gb"
@@ -28,6 +39,16 @@ services:
     tty: true
     stdin_open: true
     restart: unless-stopped
+    # `default` keeps existing behavior; `careerops-bridge` is the shared network
+    # Hermes joins so it can reach this container by name (http://career-ops:8765).
+    networks:
+      - default
+      - careerops-bridge
 
 volumes:
   career-ops-node-modules:
+
+networks:
+  # Created once on the host: `docker network create careerops-bridge`.
+  careerops-bridge:
+    external: true
