@@ -37,6 +37,11 @@ COPY package.json package-lock.json* ./
 RUN npm install --no-audit --no-fund \
  && npm install --no-audit --no-fund --save-exact playwright@1.61.0
 
+# Claude Code CLI — the batch workers (`claude -p`) run inside this container,
+# alongside the ingest server and Playwright. Installed globally (outside
+# /app/node_modules) so the named node_modules volume can't shadow it.
+RUN npm install -g @anthropic-ai/claude-code
+
 # The rest of the project is bind-mounted at runtime via docker compose,
 # so we don't COPY sources here — keeps the image generic and lets local
 # edits show up instantly inside the container.
