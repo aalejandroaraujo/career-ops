@@ -20,6 +20,9 @@ batch/tracker-additions/**/*.tsv
 !batch/tracker-additions/.gitkeep
 jds/*
 !jds/.gitkeep
+# Job-lead PDFs (printed postings dropped in via WinSCP — personal, never committed)
+job-leads/*
+!job-leads/.gitkeep
 
 # Interview prep (accumulated STAR+R stories — user data)
 interview-prep/*
