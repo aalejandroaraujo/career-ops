@@ -29,9 +29,9 @@ export { materializeSkillEntrypoints, ensureSkillEntrypoints };
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = __dirname;
 
-const CANONICAL_REPO = 'https://github.com/santifer/career-ops.git';
-const RAW_VERSION_URL = 'https://raw.githubusercontent.com/santifer/career-ops/main/VERSION';
-const RELEASES_API = 'https://api.github.com/repos/santifer/career-ops/releases/latest';
+const CANONICAL_REPO = 'https://github.com/aalejandroaraujo/career-ops.git';
+const RAW_VERSION_URL = 'https://raw.githubusercontent.com/aalejandroaraujo/career-ops/main/VERSION';
+const RELEASES_API = 'https://api.github.com/repos/aalejandroaraujo/career-ops/releases/latest';
 
 // Matches a semver, with or without a leading `v` and an optional
 // Release Please component prefix (e.g. `career-ops-v1.9.0` → `1.9.0`).
@@ -457,6 +457,10 @@ async function check() {
 // ── APPLY ───────────────────────────────────────────────────────
 
 async function apply() {
+  if (process.env.CAREEROPS_NO_SELFUPDATE === '1') {
+    console.log('Self-update disabled (CAREEROPS_NO_SELFUPDATE=1). No remote fetch performed.');
+    return;
+  }
   const local = localVersion();
   const initialStatusPaths = new Set(gitStatusEntries().map(entry => entry.path));
   const isReexec = process.env.CAREER_OPS_UPDATE_REEXEC === '1';
