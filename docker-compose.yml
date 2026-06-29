@@ -11,10 +11,15 @@ services:
     # prompt-injected JD can't escalate. 1000 matches the host owner of the
     # bind-mounted repo, so writes to reports/ data/ output/ still work.
     user: "1000:1000"
-    # Main process is the ingest server (the bridge endpoint). It keeps the
-    # container up, so `docker compose exec` / `./cops` still work as before.
-    command: ["npm", "run", "ingest"]
+    # Run BOTH long-running servers in this one container (so they share the
+    # /tmp tracker lock): the bridge ingest endpoint AND the web portal. tini
+    # (init: true) reaps; `wait -n` exits if either dies → restart recovers both.
+    command: ["sh", "-c", "node ingest-server.mjs & node portal-server.mjs & wait -n"]
     init: true
+    # Publish ONLY the web portal on the LAN (reach it at http://<juanito>:8090).
+    # The ingest endpoint (:8765) stays unpublished — bridge-internal for Hermes.
+    ports:
+      - "8090:8090"
     # Mount whole project so edits on host are visible inside the container.
     # node_modules is kept inside the image to avoid host/container ABI mismatch
     # (host is ubuntu26.04 where playwright won't install; image is jammy).
@@ -32,6 +37,10 @@ services:
       - HOME=/home/cops
       # Bearer token the ingest endpoint requires. Set it in .env.
       - CAREEROPS_INGEST_TOKEN=${CAREEROPS_INGEST_TOKEN:-}
+      # Web portal basic-auth credentials (set in .env). The portal can edit the
+      # tracker, so it requires these.
+      - CAREEROPS_PORTAL_USER=${CAREEROPS_PORTAL_USER:-}
+      - CAREEROPS_PORTAL_PASS=${CAREEROPS_PORTAL_PASS:-}
       # ANTHROPIC_API_KEY is intentionally NOT forwarded: claude -p must use the
       # container's own subscription login, and an env key would override it.
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}

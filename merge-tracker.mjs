@@ -376,6 +376,52 @@ function validateStatus(status) {
   return 'Evaluated';
 }
 
+// --- `--set-status <num> <Status>`: update one row's status under the tracker
+// lock, then exit before the merge body runs. The web portal calls this as a
+// subprocess so its writes serialize with the worker's merges via the same lock
+// (already acquired above). detectColumns/validateStatus/writeFileAtomic reused.
+if (process.argv.includes('--set-status')) {
+  const ssIdx = process.argv.indexOf('--set-status');
+  const ssNum = parseInt(process.argv[ssIdx + 1], 10);
+  const ssRaw = String(process.argv[ssIdx + 2] ?? '').trim();
+  if (!Number.isInteger(ssNum) || !ssRaw) {
+    console.error('usage: node merge-tracker.mjs --set-status <num> <Status>');
+    process.exit(2);
+  }
+  const ssStatus = validateStatus(ssRaw);
+  const ssLines = readFileSync(APPS_FILE, 'utf8').split('\n');
+  // Find num + status column indices from the header row by name (handles the
+  // optional Location column). Self-contained so it works before HEADER_ALIASES.
+  let ssNumIdx = 1, ssStatusIdx = 6; // 9-col default
+  for (const line of ssLines) {
+    if (!line.startsWith('|')) continue;
+    const h = line.split('|').map((c) => c.trim().toLowerCase());
+    if (!h.includes('company') || !h.includes('role')) continue;
+    const ni = h.findIndex((c) => ['#', 'num', 'no', 'number'].includes(c));
+    const si = h.findIndex((c) => ['status', 'estado'].includes(c));
+    if (ni >= 0 && si >= 0) { ssNumIdx = ni; ssStatusIdx = si; }
+    break;
+  }
+  let ssDone = false;
+  for (let li = 0; li < ssLines.length; li++) {
+    if (!ssLines[li].startsWith('|')) continue;
+    const cells = ssLines[li].split('|');
+    if (cells.length <= ssStatusIdx) continue;
+    if (parseInt(cells[ssNumIdx].trim(), 10) !== ssNum) continue;
+    cells[ssStatusIdx] = ` ${ssStatus} `; // keep "| cell |" spacing
+    ssLines[li] = cells.join('|');
+    ssDone = true;
+    break;
+  }
+  if (!ssDone) {
+    console.error(`No tracker row #${ssNum}`);
+    process.exit(3);
+  }
+  writeFileAtomic(APPS_FILE, ssLines.join('\n'));
+  console.log(`✅ #${ssNum} → ${ssStatus}`);
+  process.exit(0);
+}
+
 /**
  * Normalize company names for duplicate lookup during tracker merges.
  *

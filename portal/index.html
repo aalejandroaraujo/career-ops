@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>career-ops — pipeline</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <header>
+    <div class="bar">
+      <h1>career-ops</h1>
+      <button id="refresh" title="Reload">↻</button>
+    </div>
+    <div class="controls">
+      <input id="search" type="search" placeholder="Search company / role…" autocomplete="off" />
+      <select id="statusFilter"><option value="">All statuses</option></select>
+      <select id="sort">
+        <option value="num">Newest</option>
+        <option value="score">Score ↓</option>
+        <option value="status">Status</option>
+        <option value="company">Company</option>
+      </select>
+    </div>
+  </header>
+
+  <main>
+    <div id="stats" class="stats"></div>
+    <div id="rows" class="cards"></div>
+    <p id="empty" class="empty" hidden>No jobs yet. Send a job URL to Hermes to get started.</p>
+  </main>
+
+  <aside id="drawer" class="drawer" hidden>
+    <button id="drawerClose" class="close" aria-label="Close">×</button>
+    <div id="drawerBody"></div>
+  </aside>
+  <div id="scrim" class="scrim" hidden></div>
+
+  <script src="/app.js"></script>
+</body>
+</html>

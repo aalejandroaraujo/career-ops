@@ -1,0 +1,70 @@
+:root {
+  --bg: #0f1115; --panel: #171a21; --card: #1a1e27; --line: #262b36; --text: #e6e9ef; --muted: #8b93a7;
+  --green: #4ade80; --yellow: #fbbf24; --red: #f87171; --blue: #60a5fa; --accent: #7c93f5;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { background: var(--bg); color: var(--text);
+  font: 15px/1.5 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  -webkit-text-size-adjust: 100%; }
+
+/* sticky header, safe-area aware for notched phones */
+header { position: sticky; top: 0; z-index: 5; background: var(--panel);
+  border-bottom: 1px solid var(--line);
+  padding: calc(env(safe-area-inset-top) + 10px) 14px 10px; }
+.bar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.bar h1 { font-size: 16px; margin: 0; letter-spacing: .5px; color: var(--accent); }
+.controls { display: flex; gap: 8px; flex-wrap: wrap; }
+input, select, button { background: var(--bg); color: var(--text); border: 1px solid var(--line);
+  border-radius: 10px; padding: 10px 12px; font-size: 16px; /* 16px stops iOS zoom-on-focus */ }
+input#search { flex: 1 1 100%; }
+.controls select { flex: 1; min-width: 130px; }
+button { cursor: pointer; min-width: 44px; min-height: 44px; } /* touch target */
+button:active { border-color: var(--accent); }
+
+main { padding: 12px 14px calc(env(safe-area-inset-bottom) + 80px); max-width: 880px; margin: 0 auto; }
+.stats { color: var(--muted); margin: 2px 2px 12px; font-size: 13px; }
+.empty { color: var(--muted); text-align: center; margin-top: 48px; }
+.muted { color: var(--muted); }
+
+/* card list — works identically on phone and desktop */
+.cards { display: flex; flex-direction: column; gap: 10px; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 14px; }
+.card .top { display: flex; align-items: flex-start; gap: 10px; }
+.card .co { font-weight: 700; font-size: 16px; flex: 1; cursor: pointer; }
+.card .co:active { color: var(--accent); }
+.card .role { color: var(--muted); margin: 2px 0 10px; }
+.fit { font-weight: 800; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.fit.hi { color: var(--green); } .fit.mid { color: var(--yellow); } .fit.lo { color: var(--red); }
+.card .meta { display: flex; flex-wrap: wrap; gap: 8px 14px; color: var(--muted); font-size: 13px; margin-top: 4px; }
+.card .foot { display: flex; align-items: center; gap: 10px; margin-top: 12px; flex-wrap: wrap; }
+select.status { flex: 1; min-width: 150px; padding: 10px; border-radius: 10px; font-size: 15px; }
+select.status[data-s="Applied"], select.status[data-s="Interview"], select.status[data-s="Offer"], select.status[data-s="Responded"] { border-color: var(--green); }
+select.status[data-s="Rejected"], select.status[data-s="Discarded"], select.status[data-s="SKIP"] { border-color: var(--red); }
+.link { color: var(--blue); text-decoration: none; cursor: pointer; padding: 8px 4px; }
+.link:active { text-decoration: underline; }
+
+/* detail drawer — full-screen on phones, side panel on desktop */
+.scrim { position: fixed; inset: 0; background: rgba(0,0,0,.55); z-index: 8; }
+.drawer { position: fixed; top: 0; right: 0; height: 100%; width: min(560px, 100vw);
+  background: var(--panel); border-left: 1px solid var(--line); z-index: 9; overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: calc(env(safe-area-inset-top) + 16px) 18px calc(env(safe-area-inset-bottom) + 60px); }
+.drawer .close { position: absolute; top: 8px; right: 10px; font-size: 24px; border: none; background: none; }
+.drawer h2 { margin: 4px 40px 2px 0; font-size: 19px; }
+.drawer h3 { margin: 22px 0 6px; font-size: 12px; text-transform: uppercase; color: var(--muted); letter-spacing: .5px; }
+.kv { display: grid; grid-template-columns: 110px 1fr; gap: 6px 10px; margin: 8px 0; }
+.kv dt { color: var(--muted); } .kv dd { margin: 0; }
+.badge { display: inline-block; padding: 5px 10px; border-radius: 999px; font-size: 13px; border: 1px solid var(--line); text-decoration: none; color: var(--text); }
+.badge.apply { color: var(--green); border-color: var(--green); }
+.badge.skip, .badge.no { color: var(--red); border-color: var(--red); }
+.actions { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+.report { white-space: pre-wrap; word-break: break-word; background: var(--bg); border: 1px solid var(--line);
+  border-radius: 10px; padding: 12px; margin-top: 8px; font-size: 13.5px; max-height: 55vh; overflow-y: auto; }
+.report h1, .report h2, .report h3 { color: var(--accent); margin: 12px 0 4px; }
+code { background: #0b0d11; padding: 1px 5px; border-radius: 5px; }
+
+@media (min-width: 620px) {
+  /* denser two-line cards on wider screens; still the same markup */
+  .card .meta { font-size: 13.5px; }
+}
