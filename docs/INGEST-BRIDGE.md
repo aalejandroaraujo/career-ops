@@ -23,8 +23,22 @@ Telegram ─▶ Hermes ─▶ POST http://career-ops:8765/ingest {url,note}
   `data/applications.md`, appends a row to `batch/batch-input.tsv`, and fires a
   **single-flight** `batch-runner.sh` drain. Returns `202 {accepted, id}`.
 - `GET /health` → `200 {ok, configured}`.
-- Everything after enqueue (fetch JD, score Blocks A–G, render the tailored CV
-  PDF, merge the tracker) is the unchanged batch pipeline.
+- Everything after enqueue (score Blocks A–G, render the tailored CV PDF, merge
+  the tracker) is the unchanged batch pipeline.
+
+## Robust JD fetching (`fetch-jd.mjs`)
+`batch-runner.sh` pre-fetches the JD before the worker runs, so SPA/company pages
+(Workday, Ashby, custom React) — which the worker's built-in WebFetch can't render
+(no JS) — still produce real content. Tiered, cheapest first:
+1. **ATS API** (no browser): Greenhouse (`?content=true` → HTML → text) and Lever
+   (`descriptionPlain`), via `resolveAtsApi` in `liveness-api.mjs`.
+2. **Headless Chromium render** for everything else, using the project's desktop-UA
+   context (`liveness-browser.mjs`); also saves a PDF artifact to `jds/`.
+3. **Failure** → the worker falls back to WebFetch exactly as before (no regression).
+
+This means the final post-Apply company URL your wife sends (Greenhouse/Lever/Ashby/
+Workday/careers page — public, not LinkedIn) evaluates well without any manual
+print-to-PDF. Manual `jds/` drop remains for the rare login-walled page.
 
 ## One-time setup on juanito
 
