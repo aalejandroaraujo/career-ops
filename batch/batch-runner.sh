@@ -435,6 +435,23 @@ process_offer() {
 
   local log_file="$LOGS_DIR/${report_num}-${id}.log"
 
+  # Pre-fetch the JD so the worker gets real content even for SPA pages its
+  # WebFetch can't render (Workday/Ashby/custom React). `local:jds/` → use the
+  # cached file; otherwise fetch-jd.mjs (ATS API → headless Chromium render).
+  # On failure leave $jd_file unwritten so the worker falls back to WebFetch
+  # (batch-prompt "Paso 1") — no regression vs. the previous behaviour.
+  if [[ "$url" =~ ^local:jds/ ]]; then
+    if cp "$PROJECT_DIR/jds/${url#local:jds/}" "$jd_file" 2>>"$log_file"; then
+      echo "    📄 Using cached JD: ${url#local:jds/}"
+    else
+      echo "    ⚠️  Local JD not found: ${url#local:jds/}"
+    fi
+  elif node "$PROJECT_DIR/fetch-jd.mjs" "$url" --out "$jd_file" --pdf-dir "$PROJECT_DIR/jds" >>"$log_file" 2>&1; then
+    echo "    📥 Pre-fetched JD ($(wc -c <"$jd_file" 2>/dev/null || echo 0) bytes)"
+  else
+    echo "    ⚠️  JD pre-fetch failed — worker will WebFetch"
+  fi
+
   # Prepare system prompt with placeholders resolved
   local resolved_prompt="$BATCH_DIR/.resolved-prompt-${id}.md"
   # Escape sed delimiter characters in variables to prevent substitution breakage
