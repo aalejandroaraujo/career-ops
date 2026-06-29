@@ -42,6 +42,14 @@ RUN npm install --no-audit --no-fund \
 # /app/node_modules) so the named node_modules volume can't shadow it.
 RUN npm install -g @anthropic-ai/claude-code
 
+# Non-root runtime home owned by uid 1000 (the host user). The container runs
+# unprivileged as 1000:1000 (see docker-compose.yml); HOME points here and the
+# `careerops-claude-home` named volume mounts here, so Claude Code's session
+# (~/.claude) is container-owned — the host's credentials are never mounted in.
+# Creating it owned by 1000 also seeds the named volume with the right ownership
+# on first mount, so the unprivileged user can write its login.
+RUN mkdir -p /home/cops && chown -R 1000:1000 /home/cops
+
 # The rest of the project is bind-mounted at runtime via docker compose,
 # so we don't COPY sources here — keeps the image generic and lets local
 # edits show up instantly inside the container.

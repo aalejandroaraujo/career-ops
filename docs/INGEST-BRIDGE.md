@@ -28,23 +28,27 @@ Telegram ─▶ Hermes ─▶ POST http://career-ops:8765/ingest {url,note}
 
 ## One-time setup on juanito
 
-1. **Auth must exist on the host first** (the container mounts it):
-   ```bash
-   claude            # then /login once, so ~/.claude and ~/.claude.json exist
-   ```
-2. **Create the shared network:**
+1. **Create the shared network** (must exist before `up`, it's external):
    ```bash
    docker network create careerops-bridge
    ```
-3. **Set the token** in `~/career-ops/.env`:
+2. **Set the ingest token** in `~/career-ops/.env`:
    ```bash
-   echo "CAREEROPS_INGEST_TOKEN=$(openssl rand -hex 32)" >> .env
+   grep -q CAREEROPS_INGEST_TOKEN .env || echo "CAREEROPS_INGEST_TOKEN=$(openssl rand -hex 32)" >> .env
    ```
-4. **Rebuild + restart** (the `-v` refreshes the node_modules volume so the new
-   in-image Claude Code install isn't shadowed — same trap as the Playwright fix):
+3. **Build + start** — `rebuild` (not `up`) because the image changed; `-v` clears
+   stale volumes:
    ```bash
-   docker compose down -v && ./cops up
+   docker compose down -v && ./cops rebuild
    ```
+4. **Log Claude in *inside* the container** (one time — same Max account; the
+   session is saved in the container-owned `careerops-claude-home` volume, never
+   your host `~/.claude`):
+   ```bash
+   docker compose exec -it career-ops claude        # then /login, approve in a browser, /exit
+   docker compose exec career-ops claude -p "say hi"   # verify auth
+   ```
+   No restart needed — the next `claude -p` worker reads the saved session.
 5. **Join Hermes** to the same network. Pin it in Hermes' config
    (`terminal.network: careerops-bridge`) so it survives sandbox restarts, rather
    than relying on the hashed container name.
@@ -56,13 +60,27 @@ token.* v1 is a shell `curl` from Hermes' tool; the token lives in Hermes'
 secrets. Hermes stays browserless — career-ops does the fetch and the render.
 
 ## Security
-- No published host port; reachable only on `careerops-bridge`.
-- Bearer token required; lives in `.env` / Hermes secrets, never in git.
+The workers read **untrusted content** (job postings), so the container is
+hardened against a prompt-injected JD:
+- **Runs unprivileged** (uid 1000) — no root, so an injected worker can't escalate
+  or overwrite root-owned files. This is also why `--dangerously-skip-permissions`
+  is allowed (Claude Code blocks that flag only for root).
+- **Container-owned Claude login** — the host's `~/.claude` is never mounted in.
+  The worker only ever sees the container's own session (revoke/rotate it
+  separately without touching your host login).
+- No published host port; reachable only on `careerops-bridge` + a bearer token.
 - URL guard rejects loopback/private/link-local/invalid hosts.
-- `ANTHROPIC_API_KEY` is intentionally not forwarded into the container, so
-  `claude -p` uses the mounted subscription token.
-- **Never auto-submits.** The pipeline evaluates and renders only; sending an
-  application stays a manual, human-reviewed step.
+- `ANTHROPIC_API_KEY` not forwarded, so the container login is used.
+- **Never auto-submits.** Evaluate + render only; sending an application stays a
+  manual, human-reviewed step.
+
+> [!warning] Residual risk: token exfiltration
+> The in-container session token is still readable by the worker (it must be, to
+> call the API). Non-root + container-owned login stop *tampering* and protect your
+> host credentials, but the real defense against a hijacked worker **sending** the
+> token somewhere is **egress control**: restrict the container's outbound traffic
+> to the job boards + `api.anthropic.com`. That's a host-side firewall step
+> (`DOCKER-USER` / a filtered network), tracked separately.
 
 ## Verify
 ```bash

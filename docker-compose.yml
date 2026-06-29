@@ -6,8 +6,11 @@ services:
     image: career-ops:local
     container_name: career-ops
     working_dir: /app
-    # Run as root so HOME=/root (where the mounted Claude auth lands) is writable.
-    user: "root"
+    # Run UNPRIVILEGED as uid:gid 1000 (the host user), so the batch workers'
+    # `claude -p --dangerously-skip-permissions` runs without root, and a
+    # prompt-injected JD can't escalate. 1000 matches the host owner of the
+    # bind-mounted repo, so writes to reports/ data/ output/ still work.
+    user: "1000:1000"
     # Main process is the ingest server (the bridge endpoint). It keeps the
     # container up, so `docker compose exec` / `./cops` still work as before.
     command: ["npm", "run", "ingest"]
@@ -18,19 +21,19 @@ services:
     volumes:
       - .:/app
       - career-ops-node-modules:/app/node_modules
-      # Share the host's Claude Code auth so in-container `claude -p` uses the
-      # same subscription session. These must exist on the host first
-      # (run `claude` + `/login` once before `up`).
-      - ${HOME}/.claude:/root/.claude
-      - ${HOME}/.claude.json:/root/.claude.json
+      # Container-OWNED Claude home (named volume, not the host's ~/.claude).
+      # You `claude /login` once INSIDE the container with your same Max account;
+      # the session lives here. The host's credentials are never exposed to the
+      # workers, so a prompt-injected JD can't read or tamper with them.
+      - careerops-claude-home:/home/cops
     environment:
       - NODE_ENV=development
       - PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
-      - HOME=/root
+      - HOME=/home/cops
       # Bearer token the ingest endpoint requires. Set it in .env.
       - CAREEROPS_INGEST_TOKEN=${CAREEROPS_INGEST_TOKEN:-}
       # ANTHROPIC_API_KEY is intentionally NOT forwarded: claude -p must use the
-      # mounted ~/.claude subscription token, and an env key would override it.
+      # container's own subscription login, and an env key would override it.
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
     # Chromium needs a larger /dev/shm than the default 64M.
@@ -47,6 +50,9 @@ services:
 
 volumes:
   career-ops-node-modules:
+  # Container-owned Claude Code home (holds the in-container `claude /login`
+  # session). Independent of the host's ~/.claude; revoke/rotate separately.
+  careerops-claude-home:
 
 networks:
   # Created once on the host: `docker network create careerops-bridge`.
