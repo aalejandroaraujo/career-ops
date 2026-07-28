@@ -20,6 +20,7 @@
     "scan": "node scan.mjs",
     "ingest": "node ingest-server.mjs",
     "mcp": "node mcp-server.mjs",
+    "web": "node web-server.mjs",
     "tracker:migrate": "node tracker-uid-migrate.mjs",
     "hooks:install": "git config core.hooksPath .githooks",
     "prepare": "git config core.hooksPath .githooks || true",

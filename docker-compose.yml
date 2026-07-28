@@ -83,6 +83,51 @@ services:
     networks:
       - careerops-bridge
 
+  # Web UI — the LAN front door onto the same tracker Hermes uses.
+  #
+  # Presentation + proxy ONLY. It has no write authority: the repo is mounted
+  # READ-ONLY and every mutation goes to the /tracker/* API on career-ops, which
+  # is the sole tracker writer. That matters because the tracker file lock's
+  # liveness check (process.kill(pid,0)) only resolves pids inside one PID
+  # namespace — a second container writing the files directly could remove a
+  # live lock held by merge-tracker and lose rows.
+  #
+  # It also means a compromise of the only LAN-exposed process here stays a
+  # read-only incident, which is worth having next to a container that runs
+  # `claude -p` workers with a credentialed home directory.
+  career-ops-web:
+    image: career-ops:local
+    container_name: career-ops-web
+    working_dir: /app
+    user: "1000:1000"
+    command: ["npm", "run", "web"]
+    init: true
+    # Bound to the LAN address explicitly, never 0.0.0.0.
+    #
+    # ⚠️ Docker publishes bypass ufw: published ports are DNAT'd in nat/PREROUTING
+    # and traverse FORWARD, not INPUT, so ufw's default-deny does NOT cover them.
+    # Naming the interface keeps this off every other interface and makes the
+    # exposure auditable; CAREEROPS_WEB_PASSWORD is the actual access control.
+    # For subnet-level restriction add a DOCKER-USER rule, not a ufw one.
+    ports:
+      - "192.168.1.16:8767:8767"
+    depends_on:
+      - career-ops
+    volumes:
+      - .:/app:ro
+      - career-ops-node-modules:/app/node_modules
+    environment:
+      - NODE_ENV=development
+      - CAREEROPS_INGEST_BASE=http://career-ops:8765
+      # Held server-side; the browser never sees it.
+      - CAREEROPS_INGEST_TOKEN=${CAREEROPS_INGEST_TOKEN:-}
+      # Required — the server refuses to start without it (fail-closed).
+      - CAREEROPS_WEB_PASSWORD=${CAREEROPS_WEB_PASSWORD:-}
+      - CAREEROPS_WEB_PORT=8767
+    restart: unless-stopped
+    networks:
+      - careerops-bridge
+
 volumes:
   career-ops-node-modules:
   # Container-owned Claude Code home (holds the in-container `claude /login`

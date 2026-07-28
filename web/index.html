@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="color-scheme" content="dark light" />
+  <title>career-ops — applications</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+
+  <!-- Login gate. The shell is served unauthenticated; every byte of data is
+       behind /api/, so nothing sensitive reaches an unauthenticated browser. -->
+  <section id="login" class="login" hidden>
+    <h1>career-ops</h1>
+    <p>Application tracker</p>
+    <form id="loginForm">
+      <input id="password" type="password" placeholder="Password" autocomplete="current-password" required />
+      <button type="submit">Sign in</button>
+      <div id="loginErr" class="err" hidden>Wrong password</div>
+    </form>
+  </section>
+
+  <div id="app" hidden>
+    <header>
+      <div class="bar">
+        <h1>career-ops</h1>
+        <button id="view" class="icon" title="Switch between cards and board" aria-label="Switch view">▦</button>
+        <button id="refresh" class="icon" title="Reload" aria-label="Reload">↻</button>
+        <button id="logout" class="icon" title="Sign out" aria-label="Sign out">⏻</button>
+      </div>
+      <div class="controls">
+        <input id="search" type="search" placeholder="Search company, role, notes…" autocomplete="off" />
+      </div>
+      <div id="chips" class="chips"></div>
+    </header>
+
+    <main>
+      <div id="stats" class="stats"></div>
+      <div id="rows" class="cards"></div>
+      <div id="board" class="board" hidden></div>
+      <p id="empty" class="empty" hidden>Nothing here. Send a job URL or a JD to Hermes to get started.</p>
+    </main>
+  </div>
+
+  <aside id="drawer" class="drawer" hidden>
+    <button id="drawerClose" class="close" aria-label="Close">×</button>
+    <div id="drawerBody"></div>
+  </aside>
+  <div id="scrim" class="scrim" hidden></div>
+
+  <script src="/app.js"></script>
+</body>
+</html>
