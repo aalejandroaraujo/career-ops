@@ -11,8 +11,12 @@
  */
 
 import { mkdirSync, writeFileSync, readFileSync, existsSync, rmSync, readdirSync, mkdtempSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
+import { execFile } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+
+const REPO = dirname(fileURLToPath(import.meta.url));
 import {
   acquireTrackerLock, resolveTrackerLockDir, trackerLockDirFor,
   writeFileAtomic, withTrackerLock, canonicalizeTrackerPath,
@@ -183,6 +187,43 @@ console.log('\n10. withTrackerLock');
   } catch (e) { caught = e; }
   eq(caught?.message, 'boom', 'a throwing callback propagates');
   eq(existsSync(trackerLockDirFor(tracker, undefined)), false, 'lock released even when the callback throws');
+}
+
+console.log('\n11. Every tracker writer actually takes the lock');
+{
+  // A lock only one writer respects is theatre. Before this, dedup-tracker,
+  // normalize-statuses, tracker delete, the Go TUI and the agent's Edit tool all
+  // read-modify-wrote the tracker freely, and three did so non-atomically.
+  const dir = join(TMP, 'writers');
+  mkdirSync(dir, { recursive: true });
+  const tracker = join(dir, 'applications.md');
+  writeFileSync(tracker, [
+    '# Applications Tracker', '',
+    '| # | Date | Company | Role | Score | Status | PDF | Report | Notes | UID |',
+    '|---|------|---------|------|-------|--------|-----|--------|-------|---|',
+    '| 1 | 2026-07-01 | Acme | Role | 4.0/5 | Applied | ❌ | [001](../reports/001-x.md) | n | ca_01KYMD5T20QWX9J9NGAN5NNF20 |',
+    '',
+  ].join('\n'));
+
+  const held = await acquireTrackerLock(trackerLockDirFor(tracker, undefined), { tracker });
+  const run = (script) => new Promise((resolve) => {
+    execFile(process.execPath, [join(REPO, script)], {
+      env: { ...process.env, CAREER_OPS_TRACKER: tracker, CAREER_OPS_TRACKER_LOCK_TIMEOUT_MS: '900' },
+    }, (err) => resolve(err?.code ?? 0));
+  });
+
+  for (const script of ['dedup-tracker.mjs', 'normalize-statuses.mjs']) {
+    eq(await run(script), 1, `${script} blocks while the tracker lock is held`);
+  }
+  held.release();
+  for (const script of ['dedup-tracker.mjs', 'normalize-statuses.mjs']) {
+    eq(await run(script), 0, `${script} proceeds once the lock is released`);
+  }
+
+  // Both must also honour CAREER_OPS_TRACKER, or a test "against a fixture"
+  // silently operates on the user's real career data.
+  eq(readFileSync(tracker, 'utf-8').includes('ca_01KYMD5T20QWX9J9NGAN5NNF20'), true,
+    'the fixture (not the real tracker) is what the scripts operated on');
 }
 
 rmSync(TMP, { recursive: true, force: true });

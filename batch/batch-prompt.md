@@ -399,7 +399,20 @@ Formato TSV (una sola línea, sin header, 9 columnas tab-separated):
 
 **Estados canónicos válidos:** `Evaluada`, `Aplicado`, `Respondido`, `Entrevista`, `Oferta`, `Rechazado`, `Descartado`, `NO APLICAR`
 
-Donde `{next_num}` se calcula leyendo la última línea de `data/applications.md`.
+Donde `{next_num}` es el **máximo `#` existente + 1** en `data/applications.md`
+(consistente con la validación de la fila 1 de la tabla anterior).
+
+> ⚠️ **No leas "la última línea".** La tabla está ordenada de forma
+> **descendente** y `merge-tracker.mjs` inserta las filas nuevas **arriba**, así
+> que la última línea es la entrada **más antigua** (`#1`). Cada worker
+> propondría el mismo número, y `merge-tracker.mjs` lo renumeraría en silencio
+> al detectar la colisión. Eso es exactamente por qué los números de fila y de
+> report divergen en trackers existentes (fila `#2`→report `[3]`, `#3`→`[4]`,
+> `#4`→`[2]`).
+>
+> El orquestador ya reserva el número de report de forma atómica con
+> `reserve-report-num.mjs` (`O_CREAT|O_EXCL`) y te lo pasa como `{{REPORT_NUM}}`
+> — úsalo en lugar de calcularlo tú cuando esté disponible.
 
 ### Paso 6 — Output final
 

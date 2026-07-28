@@ -34,11 +34,30 @@
  * so the index can never serve stale reads.
  */
 
-import { readFileSync, writeFileSync, copyFileSync, existsSync, mkdirSync, statSync, renameSync, rmSync } from 'fs';
+import { readFileSync, writeFileSync, copyFileSync, existsSync, mkdirSync, statSync } from 'fs';
 import { createHash } from 'crypto';
-import { dirname, resolve, join, basename } from 'path';
+import { dirname, resolve, join } from 'path';
 import { pathToFileURL } from 'url';
 import yaml from 'js-yaml';
+import { withTrackerLock, writeFileAtomic } from './tracker-lock.mjs';
+import { appendEvent, readTracker as readTrackerStore } from './tracker-store.mjs';
+
+/**
+ * Read the tracker's rows through the shared store, for uid lookups.
+ *
+ * tracker.mjs has its own parser tuned for corruption diagnostics; this is only
+ * used where the canonical uid matters, so both stay in their own lane.
+ *
+ * @param {string} _content - Current file content (unused; the store re-reads).
+ * @returns {object[]} Parsed rows.
+ */
+function readTrackerRows(_content) {
+  try {
+    return readTrackerStore({ trackerPath: MD_PATH }).rows;
+  } catch {
+    return [];
+  }
+}
 
 const MD_PATH = process.env.CAREER_OPS_TRACKER || 'data/applications.md';
 const DB_PATH = process.env.CAREER_OPS_TRACKER_DB
@@ -500,26 +519,16 @@ async function exportMd(args) {
 
 // ── Main ────────────────────────────────────────────────────────────
 
-// Atomic file replace via a same-directory temp file + rename, so a reader never
-// sees a partially written applications.md (mirrors merge-tracker's writer).
-function writeFileAtomic(filePath, content) {
-  const tmp = join(dirname(filePath), `.${basename(filePath)}.${process.pid}.${Date.now()}.tmp`);
-  try {
-    writeFileSync(tmp, content);
-    renameSync(tmp, filePath);
-  } catch (err) {
-    rmSync(tmp, { force: true });
-    throw err;
-  }
-}
-
 // `delete --num N` removes one application row from applications.md and rebuilds
 // the derived index. The markdown stays the source of truth: callers (incl. the
-// web) orchestrate this script rather than editing applications.md directly, so
-// the write-gate holds. The write is atomic; callers should still avoid running
-// a delete concurrently with a scan-merge (they share the same file — serialize
-// at the orchestration layer; a shared lock is a follow-up once merge-tracker is
-// import-safe).
+// web UI and the MCP tools) orchestrate this script rather than editing
+// applications.md directly, so the write-gate holds.
+//
+// The read/modify/write now runs under the shared tracker lock from
+// tracker-lock.mjs, so a delete can no longer race a merge — this closes the
+// follow-up this comment used to describe ("a shared lock is a follow-up once
+// merge-tracker is import-safe"); merge-tracker is import-safe as of the lock
+// extraction.
 async function deleteApp(args) {
   const num = flagValue(args, '--num');
   if (!num) {
@@ -530,17 +539,41 @@ async function deleteApp(args) {
     console.error(`Error: ${MD_PATH} not found — nothing to delete.`);
     process.exit(1);
   }
-  const { removed, removedCount, report, newContent } = removeRowByNum(readFileSync(MD_PATH, 'utf-8'), num);
-  if (!removed) {
-    console.error(`No application numbered ${num} in ${MD_PATH}.`);
-    process.exit(1);
-  }
+  // A dry run only reads, so it needs no lock.
   if (args.includes('--dry-run')) {
-    console.error(`Would remove application ${num} (${removedCount} row${removedCount > 1 ? 's' : ''}) from ${MD_PATH}.`);
-    if (report) console.error(`(report file would be orphaned: ${report})`);
+    const preview = removeRowByNum(readFileSync(MD_PATH, 'utf-8'), num);
+    if (!preview.removed) {
+      console.error(`No application numbered ${num} in ${MD_PATH}.`);
+      process.exit(1);
+    }
+    console.error(`Would remove application ${num} (${preview.removedCount} row${preview.removedCount > 1 ? 's' : ''}) from ${MD_PATH}.`);
+    if (preview.report) console.error(`(report file would be orphaned: ${preview.report})`);
     return;
   }
-  writeFileAtomic(MD_PATH, newContent);
+
+  // Read and write inside one critical section: re-reading under the lock means
+  // a merge that landed while we waited is respected rather than overwritten.
+  const { removedCount, report, uid } = await withTrackerLock(MD_PATH, () => {
+    const current = readFileSync(MD_PATH, 'utf-8');
+    const res = removeRowByNum(current, num);
+    if (!res.removed) {
+      console.error(`No application numbered ${num} in ${MD_PATH}.`);
+      process.exit(1);
+    }
+    // Capture the uid before the row goes, so its history can be tombstoned
+    // rather than silently orphaned in the ledger.
+    const doomed = readTrackerRows(current).find(r => String(r.num) === String(num));
+    writeFileAtomic(MD_PATH, res.newContent);
+    return { removedCount: res.removedCount, report: res.report, uid: doomed?.uid || null };
+  });
+
+  if (uid) {
+    try {
+      appendEvent({ uid, kind: 'deleted', actor: 'tracker-delete', row_num: String(num) }, { trackerPath: MD_PATH });
+    } catch (e) {
+      console.error(`(row removed; ledger tombstone skipped: ${e.message})`);
+    }
+  }
   // Rebuild the derived SQLite index from the now-updated markdown.
   try {
     const states = loadStates();

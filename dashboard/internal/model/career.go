@@ -13,6 +13,12 @@ type CareerApplication struct {
 	ReportPath   string
 	ReportNumber string
 	Notes        string
+	// UID is the stable application id from the tracker's 10th column
+	// ("ca_" + ULID), empty on an un-migrated tracker. It is the only
+	// unambiguous way to address a row: tracker numbers get reassigned by
+	// merge-tracker, and report numbers drift from them and are inconsistently
+	// zero-padded ([7] vs [024]).
+	UID          string
 	JobURL       string // URL of the original job posting
 	// Derived from Notes free-text (see data.deriveNoteFields)
 	Location    string  // "City, ST" when a US city+state appears in the notes

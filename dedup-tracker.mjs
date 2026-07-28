@@ -9,11 +9,13 @@
  * Run: node career-ops/dedup-tracker.mjs [--dry-run]
  */
 
-import { readFileSync, writeFileSync, copyFileSync, existsSync, mkdirSync } from 'fs';
+import { readFileSync, copyFileSync, existsSync, mkdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { roleFuzzyMatch } from './role-matcher.mjs';
 import { rebuildRow } from './tracker-utils.mjs';
+import { acquireTrackerLock, trackerLockDirFor, writeFileAtomic } from './tracker-lock.mjs';
+import { appendEvent, readTracker } from './tracker-store.mjs';
 
 const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
 // Support both layouts: data/applications.md (boilerplate) and applications.md
@@ -28,6 +30,27 @@ const DRY_RUN = process.argv.includes('--dry-run');
 
 // Ensure the target tracker directory exists in both normal and fixture mode.
 mkdirSync(dirname(APPS_FILE), { recursive: true });
+
+// Take the tracker lock BEFORE reading. The critical section has to cover the
+// whole read/modify/write: reading outside it means a merge landing in between
+// gets erased by this script's write, which is the exact lost-update the lock
+// exists to stop. A dry run changes nothing, so it needs no lock.
+let trackerLock;
+if (!DRY_RUN) {
+  try {
+    trackerLock = await acquireTrackerLock(trackerLockDirFor(APPS_FILE), {
+      timeoutMs: Number(process.env.CAREER_OPS_TRACKER_LOCK_TIMEOUT_MS) || 60_000,
+      tracker: APPS_FILE,
+    });
+    process.once('exit', () => trackerLock?.release());
+    if (trackerLock.waitMs > 0) {
+      console.log(`🔒 Tracker lock acquired (waited ${trackerLock.waitMs}ms)`);
+    }
+  } catch (err) {
+    console.error(`❌ ${err.message}`);
+    process.exit(1);
+  }
+}
 
 // Status advancement order (higher = more advanced in pipeline)
 // Aplicado > Rechazado because active application > terminal state
@@ -257,6 +280,16 @@ if (!existsSync(APPS_FILE)) {
 const content = readFileSync(APPS_FILE, 'utf-8');
 const lines = content.split('\n');
 
+// Map file-line → app_uid so a removed row's history can be re-pointed at the
+// survivor. Without this the loser's notes and status events orphan the moment
+// its row leaves the table.
+const uidByLine = new Map(
+  readTracker({ trackerPath: APPS_FILE }).rows
+    .filter(r => r.uid)
+    .map(r => [r.lineIndex, r.uid]),
+);
+const merges = [];
+
 // Parse all entries
 const entries = [];
 
@@ -336,6 +369,9 @@ for (const [company, companyEntries] of groups) {
       if (lineIdx !== undefined) {
         linesToRemove.add(lineIdx);
         removed++;
+        const fromUid = uidByLine.get(lineIdx);
+        const toUid = keeper.lineIdx !== undefined ? uidByLine.get(keeper.lineIdx) : undefined;
+        if (fromUid && toUid) merges.push({ fromUid, toUid });
         console.log(`🗑️  Remove #${dup.num} (${dup.company} — ${dup.role}, ${dup.score}) → kept #${keeper.num} (${keeper.score})`);
       }
     }
@@ -352,8 +388,19 @@ console.log(`\n📊 ${removed} duplicates removed`);
 
 if (!DRY_RUN && removed > 0) {
   copyFileSync(APPS_FILE, APPS_FILE + '.bak');
-  writeFileSync(APPS_FILE, lines.join('\n'));
+  // Atomic: readers take no lock, so a plain writeFileSync can expose a
+  // half-written table to anything reading concurrently.
+  writeFileAtomic(APPS_FILE, lines.join('\n'));
   console.log('✅ Written to applications.md (backup: applications.md.bak)');
+
+  // Re-point the removed rows' history at the survivor. Emitted only after the
+  // write succeeds, so a failed dedup never leaves events pointing at a merge
+  // that did not happen.
+  for (const { fromUid, toUid } of merges) {
+    appendEvent({ uid: fromUid, kind: 'merged_into', to_uid: toUid, actor: 'dedup-tracker' },
+      { trackerPath: APPS_FILE });
+  }
+  if (merges.length) console.log(`🔗 ${merges.length} row histor${merges.length === 1 ? 'y' : 'ies'} re-pointed to the surviving entry`);
 } else if (DRY_RUN) {
   console.log('(dry-run — no changes written)');
 } else {

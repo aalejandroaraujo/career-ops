@@ -18,6 +18,7 @@ These files contain your personal data, customizations, and work product. Update
 | `interview-prep/{company}-{role}.md` | Company-specific interview prep reports (written by `/career-ops interview-prep`) |
 | `portals.yml` | Your customized company list |
 | `data/applications.md` | Your application tracker (source of truth) |
+| `data/app-events.jsonl` | Append-only ledger of per-application notes and status changes (source of truth for history — the Notes cell cannot hold notes durably, see below) |
 | `data/applications.db` | Derived query index over `applications.md` (SQLite, rebuilt by `node tracker.mjs sync` — safe to delete) |
 | `data/pipeline.md` | Your URL inbox |
 | `data/scan-history.tsv` | Your scan history |
@@ -26,6 +27,39 @@ These files contain your personal data, customizations, and work product. Update
 | `reports/*` | Your evaluation reports |
 | `output/*` | Your generated PDFs |
 | `jds/*` | Your saved job descriptions |
+
+### The tracker pair, and why notes live in a separate file
+
+`data/applications.md` holds the tabular columns; `data/app-events.jsonl` holds
+notes and status history. They are not redundant:
+
+- **`merge-tracker.mjs` destroys the Notes cell on re-evaluation.** It rebuilds
+  the row as `Re-eval {date} ({old}→{new}). {new notes}` and never reads the old
+  notes, so anything written there is lost the next time the job is re-scored.
+- **`dedup-tracker.mjs` drops the losing row entirely** when it collapses a
+  duplicate, taking that row's notes with it.
+
+So **status is dual-written** — the canonical label into the markdown Status
+cell (which survives both paths and which every existing reader depends on), plus
+an event into the ledger. **Notes go only to the ledger.**
+
+The tracker's 10th **`UID`** column (`ca_` + ULID) is the stable key both the web
+UI and the MCP tools address rows by. Row numbers are not stable: `merge-tracker`
+reassigns them on collision, and report numbers drift from them independently.
+Add it to an older tracker with `npm run tracker:migrate` (idempotent, backs up
+first).
+
+### Writing to the tracker
+
+`data/applications.md` has several writers, and they coordinate through one
+exclusive lock (`tracker-lock.mjs`). **The lock is only correct within a single
+PID namespace** — its liveness check is `process.kill(pid, 0)`, which cannot see
+processes in another container. Every writer must therefore run in the
+`career-ops` container alongside `merge-tracker.mjs` and `batch-runner.sh`.
+
+Prefer the API (`/tracker/*` on the ingest server) over editing the file: it
+takes the lock, dual-writes the ledger, and enforces the canonical status set.
+The web UI and the MCP tools both go through it for exactly that reason.
 
 ## System Layer (safe to auto-update)
 

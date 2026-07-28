@@ -332,7 +332,11 @@ Verify a posting is still live before applying — using the cheapest check that
 - JDs in `jds/` (referenced as `local:jds/{file}` in pipeline.md)
 - Batch in `batch/` (gitignored except scripts and prompt)
 - Report numbering: sequential 3-digit zero-padded, max existing + 1
-- **RULE: After each batch of evaluations, run `node merge-tracker.mjs`** to merge tracker additions and avoid duplications.
+- **RULE: After each batch of evaluations, run the merge INSIDE the container** —
+  `docker compose exec career-ops node merge-tracker.mjs` — to merge tracker additions and avoid duplications.
+  The tracker write lock lives in the OS temp dir and its liveness check (`process.kill(pid, 0)`) only resolves
+  pids in the caller's PID namespace. Running it on the host uses a *different* `/tmp` from `batch-runner.sh`,
+  so the two would never share a lock and a concurrent batch run could lose rows.
 - **RULE: NEVER create new entries in applications.md if company+role already exists.** Update the existing entry.
 
 ### TSV Format for Tracker Additions
@@ -361,7 +365,16 @@ Write one TSV file per evaluation to `batch/tracker-additions/{num}-{company-slu
 ### Pipeline Integrity
 
 1. **NEVER edit applications.md to ADD new entries** -- Write TSV in `batch/tracker-additions/` and `merge-tracker.mjs` handles the merge.
-2. **YES you can edit applications.md to UPDATE status/notes of existing entries.**
+2. **To UPDATE a status or add a note, use the tracker API, not the Edit tool.** It takes the write lock, validates the status against `states.yml`, and records the change in `data/app-events.jsonl`; a direct edit does none of that and can be clobbered by a concurrent merge.
+   ```bash
+   # find the row's app_uid (the UID column; row numbers are NOT stable)
+   docker compose exec career-ops node -e 'import("./tracker-store.mjs").then(m=>console.log(m.readTracker().rows.map(r=>`${r.app_uid} ${r.company} — ${r.role}`).join("\n")))'
+   # change status (+ optional note), or append a note
+   curl -sX POST -H "authorization: Bearer $CAREEROPS_INGEST_TOKEN" -H 'content-type: application/json' \
+     -d '{"to":"Interview","note":"1st round passed"}' http://career-ops:8765/tracker/applications/<app_uid>/status
+   ```
+   Free-text detail belongs in the **note**, never in the status — the status must stay one of the eight canonical values.
+   Hand-editing `applications.md` is a last resort (e.g. repairing corruption); if you do, run `node verify-pipeline.mjs` afterwards.
 3. All reports MUST include `**URL:**` in the header (between Score and PDF). Include `**Legitimacy:** {tier}` (see Block G in `modes/oferta.md`).
 4. All statuses MUST be canonical (see `templates/states.yml`).
 5. Health check: `node verify-pipeline.mjs`

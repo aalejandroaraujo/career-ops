@@ -16,6 +16,9 @@ import (
 var (
 	reReportLink     = regexp.MustCompile(`\[(\d+)\]\(([^)]+)\)`)
 	reScoreValue     = regexp.MustCompile(`(\d+\.?\d*)/5`)
+	// Stable application id minted by tracker-uid-migrate.mjs: "ca_" plus a
+	// 26-character Crockford base32 ULID (no I, L, O or U).
+	reAppUID = regexp.MustCompile(`^ca_[0-9A-HJKMNP-TV-Z]{26}$`)
 	reArchetype      = regexp.MustCompile(`(?i)\*\*(?:Arquetipo|Archetype)(?:\s+(?:detectado|detected))?\*\*\s*\|\s*(.+)`)
 	reTlDr           = regexp.MustCompile(`(?i)\*\*TL;DR\*\*\s*\|\s*(.+)`)
 	reTlDrColon      = regexp.MustCompile(`(?i)\*\*TL;DR:\*\*\s*(.+)`)
@@ -73,25 +76,7 @@ func ParseApplications(careerOpsPath string) []model.CareerApplication {
 			continue
 		}
 
-		// Detect delimiter: if line contains tabs, use tab-aware splitting
-		var fields []string
-		if strings.Contains(line, "\t") {
-			// Mixed format: starts with "| " then tab-separated
-			line = strings.TrimPrefix(line, "|")
-			line = strings.TrimSpace(line)
-			parts := strings.Split(line, "\t")
-			for _, p := range parts {
-				fields = append(fields, strings.TrimSpace(strings.Trim(p, "|")))
-			}
-		} else {
-			// Pure pipe format
-			line = strings.Trim(line, "|")
-			parts := strings.Split(line, "|")
-			for _, p := range parts {
-				fields = append(fields, strings.TrimSpace(p))
-			}
-		}
-
+		fields := splitRow(line)
 		if len(fields) < 8 {
 			continue
 		}
@@ -130,6 +115,14 @@ func ParseApplications(careerOpsPath string) []model.CareerApplication {
 		// Notes (field 8 if exists)
 		if len(fields) > 8 {
 			app.Notes = fields[8]
+		}
+
+		// UID (field 9 on a migrated tracker). Identified by SHAPE, not
+		// position: a legacy 9-column row whose notes contain a stray pipe also
+		// yields 10 fields, and treating that fragment as a uid would make the
+		// writer match the wrong row.
+		if len(fields) > 9 && reAppUID.MatchString(fields[9]) {
+			app.UID = fields[9]
 		}
 
 		// Lift location / work mode / pay / last-contact out of the notes free-text
@@ -590,20 +583,88 @@ func UpdateApplicationStatus(careerOpsPath string, app model.CareerApplication, 
 		if !strings.HasPrefix(strings.TrimSpace(line), "|") {
 			continue
 		}
-		// Match by report number
-		if app.ReportNumber != "" && strings.Contains(line, fmt.Sprintf("[%s]", app.ReportNumber)) {
-			// Replace the status field
-			lines[i] = replaceStatusInLine(line, app.Status, newStatus)
-			found = true
-			break
+		if !rowMatches(line, app) {
+			continue
 		}
+		lines[i] = replaceStatusInLine(line, app.Status, newStatus)
+		found = true
+		break
 	}
 
 	if !found {
-		return fmt.Errorf("application not found: report %s", app.ReportNumber)
+		return fmt.Errorf("application not found (uid %q, report %q)", app.UID, app.ReportNumber)
 	}
 
-	return os.WriteFile(filePath, []byte(strings.Join(lines, "\n")), 0644)
+	// Atomic replace: readers take no lock, so writing in place can expose a
+	// half-written table. Same-directory temp file keeps the rename atomic.
+	tmp, err := os.CreateTemp(filepath.Dir(filePath), ".applications.*.tmp")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	if _, err := tmp.WriteString(strings.Join(lines, "\n")); err != nil {
+		tmp.Close()
+		os.Remove(tmpName)
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(tmpName)
+		return err
+	}
+	if err := os.Chmod(tmpName, 0644); err != nil {
+		os.Remove(tmpName)
+		return err
+	}
+	if err := os.Rename(tmpName, filePath); err != nil {
+		os.Remove(tmpName)
+		return err
+	}
+	return nil
+}
+
+// splitRow splits one tracker table line into trimmed cells.
+//
+// Two delimiters are tolerated because both appear in real trackers: pure pipe
+// rows, and a legacy mixed form that opens with "|" then uses tabs. Shared by
+// the reader and the writer so they can never disagree about where a cell ends.
+func splitRow(line string) []string {
+	line = strings.TrimSpace(line)
+	var fields []string
+	if strings.Contains(line, "\t") {
+		line = strings.TrimSpace(strings.TrimPrefix(line, "|"))
+		for _, p := range strings.Split(line, "\t") {
+			fields = append(fields, strings.TrimSpace(strings.Trim(p, "|")))
+		}
+		return fields
+	}
+	for _, p := range strings.Split(strings.Trim(line, "|"), "|") {
+		fields = append(fields, strings.TrimSpace(p))
+	}
+	return fields
+}
+
+// rowMatches decides whether a tracker line is the row for app.
+//
+// UID first, because it is the only unambiguous key: tracker numbers get
+// reassigned by merge-tracker and report numbers drift from them.
+//
+// The report-number fallback (for un-migrated trackers) compares the PARSED
+// number rather than doing strings.Contains(line, "[23]"). That substring test
+// also matched "[234]", and matched a bracketed token anywhere in the free-text
+// Notes cell — either of which would update the wrong application's status.
+func rowMatches(line string, app model.CareerApplication) bool {
+	if app.UID != "" {
+		return strings.Contains(line, "| "+app.UID+" |") || strings.HasSuffix(strings.TrimSpace(line), "| "+app.UID+" |")
+	}
+	if app.ReportNumber == "" {
+		return false
+	}
+	fields := splitRow(line)
+	if len(fields) < 8 {
+		return false
+	}
+	rm := reReportLink.FindStringSubmatch(fields[7])
+	return rm != nil && rm[1] == app.ReportNumber
 }
 
 // replaceStatusInLine rewrites only the Status cell of a tracker row, leaving

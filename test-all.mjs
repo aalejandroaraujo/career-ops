@@ -5379,6 +5379,68 @@ try {
   fail(`user-layer guard tests crashed: ${e.message}`);
 }
 
+// ── UID COLUMN SURVIVAL ─────────────────────────────────────────
+// The specific way this feature breaks: a script that rebuilds tracker rows
+// drops the 10th column, and every uid — the key the web UI and the MCP tools
+// address rows by — is silently lost. Each writer gets a 10-column fixture and
+// must hand it back intact.
+
+console.log('\n35. UID column survives every tracker writer');
+try {
+  const uidTmp = mkdtempSync(join(tmpdir(), 'career-ops-uid-'));
+  try {
+    const tracker = join(uidTmp, 'applications.md');
+    const UID_A = 'ca_01KYMD5T20QWX9J9NGAN5NNF20';
+    const UID_B = 'ca_01KYMD5T20QWX9J9NGAN5NNF21';
+    const fixture = [
+      '# Applications Tracker', '',
+      '| # | Date | Company | Role | Score | Status | PDF | Report | Notes | UID |',
+      '|---|------|---------|------|-------|--------|-----|--------|-------|---|',
+      `| 2 | 2026-07-02 | Globex | Data Lead | 3.1/5 | Applied | ❌ | [002](../reports/002-x.md) | second | ${UID_B} |`,
+      `| 1 | 2026-07-01 | Acme | AI Architect | 4.0/5 | Evaluated | ✅ | [001](../reports/001-x.md) | first | ${UID_A} |`,
+      '',
+    ].join('\n');
+
+    const env = { ...process.env, CAREER_OPS_TRACKER: tracker, CAREER_OPS_ADDITIONS: join(uidTmp, 'additions') };
+    const uidsIn = (p) => (readFileSync(p, 'utf-8').match(/ca_[0-9A-HJKMNP-TV-Z]{26}/g) || []);
+
+    for (const [label, args] of [
+      ['normalize-statuses.mjs', ['normalize-statuses.mjs']],
+      ['dedup-tracker.mjs', ['dedup-tracker.mjs']],
+      ['merge-tracker.mjs', ['merge-tracker.mjs']],
+    ]) {
+      writeFileSync(tracker, fixture);
+      const out = run(NODE, args, { cwd: ROOT, env, stdio: ['pipe', 'pipe', 'pipe'] });
+      if (out === null) { fail(`${label} crashed on a 10-column tracker`); continue; }
+      const after = uidsIn(tracker);
+      if (after.includes(UID_A) && after.includes(UID_B)) pass(`${label} preserves the UID column`);
+      else fail(`${label} DROPPED uids — file now:\n${readFileSync(tracker, 'utf-8').split('\n').slice(2, 6).join('\n')}`);
+    }
+
+    // merge-tracker must also MINT a uid for a brand-new row on a migrated
+    // tracker, or rows it creates are unaddressable by both front doors.
+    writeFileSync(tracker, fixture);
+    const addDir = join(uidTmp, 'additions');
+    mkdirSync(addDir, { recursive: true });
+    writeFileSync(join(addDir, '900-newco.tsv'),
+      '900\t2026-07-28\tNewCo\tStaff Engineer\tEvaluated\t4.1/5\t❌\t[900](reports/900-newco-2026-07-28.md)\tfresh row\n');
+    if (run(NODE, ['merge-tracker.mjs'], { cwd: ROOT, env, stdio: ['pipe', 'pipe', 'pipe'] }) === null) {
+      fail('merge-tracker crashed while adding a row to a migrated tracker');
+    } else {
+      const text = readFileSync(tracker, 'utf-8');
+      const newRow = text.split('\n').find((l) => l.includes('NewCo'));
+      if (newRow && /ca_[0-9A-HJKMNP-TV-Z]{26}\s*\|/.test(newRow)) pass('merge-tracker mints a UID for a new row');
+      else fail(`merge-tracker added a row with no UID:\n${newRow}`);
+      if (uidsIn(tracker).length === 3) pass('all uids remain unique after the merge');
+      else fail(`expected 3 uids after merge, found ${uidsIn(tracker).length}`);
+    }
+  } finally {
+    rmSync(uidTmp, { recursive: true, force: true });
+  }
+} catch (e) {
+  fail(`UID survival tests crashed: ${e.message}`);
+}
+
 // ── FOCUSED SUITES ──────────────────────────────────────────────
 // Feature-specific suites live in their own files so they can be run alone
 // while iterating. They are executed here because CI runs ONLY this file

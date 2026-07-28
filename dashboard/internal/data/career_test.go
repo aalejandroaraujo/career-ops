@@ -62,6 +62,89 @@ func TestUpdateApplicationStatusOnlyRewritesStatusColumn(t *testing.T) {
 	}
 }
 
+// The writer used to locate a row with strings.Contains(line, "[23]"), which
+// also matches "[234]" and matches a bracketed token anywhere in the free-text
+// Notes cell — so it could rewrite the status of the wrong application.
+func TestUpdateApplicationStatusMatchesTheRightRow(t *testing.T) {
+	tempDir := t.TempDir()
+	dataDir := filepath.Join(tempDir, "data")
+	if err := os.MkdirAll(dataDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	// Row 1's report is [23]; row 2's is [234] and its notes mention "[23]".
+	// Both are traps for a substring match.
+	applications := `# Applications Tracker
+
+| # | Date | Company | Role | Score | Status | PDF | Report | Notes | UID |
+|---|------|---------|------|-------|--------|-----|--------|-------|---|
+| 1 | 2026-06-01 | Globex | Data Lead | 3.1/5 | Applied | ❌ | [234](reports/234.md) | see also [23] earlier | ca_01KYMD5T20QWX9J9NGAN5NNF20 |
+| 2 | 2026-06-02 | Acme | AI Architect | 4.5/5 | Applied | ❌ | [23](reports/023.md) | none | ca_01KYMD5T20QWX9J9NGAN5NNF21 |
+`
+	path := filepath.Join(dataDir, "applications.md")
+	if err := os.WriteFile(path, []byte(applications), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	apps := ParseApplications(tempDir)
+	if len(apps) != 2 {
+		t.Fatalf("expected 2 applications, got %d", len(apps))
+	}
+	if apps[0].UID == "" || apps[1].UID == "" {
+		t.Fatalf("UID column was not parsed: %q / %q", apps[0].UID, apps[1].UID)
+	}
+
+	// Update Acme (report [23]) — Globex ([234], notes containing "[23]") must
+	// be left completely alone.
+	acme := apps[1]
+	if acme.Company != "Acme" {
+		t.Fatalf("expected apps[1] to be Acme, got %q", acme.Company)
+	}
+	if err := UpdateApplicationStatus(tempDir, acme, "Offer"); err != nil {
+		t.Fatalf("UpdateApplicationStatus: %v", err)
+	}
+
+	after := ParseApplications(tempDir)
+	for _, a := range after {
+		switch a.Company {
+		case "Acme":
+			if a.Status != "Offer" {
+				t.Errorf("Acme status = %q, want Offer", a.Status)
+			}
+		case "Globex":
+			if a.Status != "Applied" {
+				t.Errorf("Globex was modified: status = %q, want Applied (the substring bug)", a.Status)
+			}
+		}
+	}
+}
+
+// A legacy row whose notes contain a stray pipe also yields 10 fields; that
+// fragment must not be mistaken for a uid.
+func TestParseApplicationsIgnoresNonUIDTenthField(t *testing.T) {
+	tempDir := t.TempDir()
+	dataDir := filepath.Join(tempDir, "data")
+	if err := os.MkdirAll(dataDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	applications := `# Applications Tracker
+
+| # | Date | Company | Role | Score | Status | PDF | Report | Notes |
+|---|------|---------|------|-------|--------|-----|--------|-------|
+| 1 | 2026-06-01 | Acme | Role | 4.0/5 | Applied | ❌ | [1](reports/001.md) | a | b |
+`
+	if err := os.WriteFile(filepath.Join(dataDir, "applications.md"), []byte(applications), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	apps := ParseApplications(tempDir)
+	if len(apps) != 1 {
+		t.Fatalf("expected 1 application, got %d", len(apps))
+	}
+	if apps[0].UID != "" {
+		t.Errorf("UID = %q, want empty — a stray pipe fragment is not a uid", apps[0].UID)
+	}
+}
+
 func TestParseApplicationsUsesTrackerNumberColumn(t *testing.T) {
 	tempDir := t.TempDir()
 	dataDir := filepath.Join(tempDir, "data")

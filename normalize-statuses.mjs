@@ -11,20 +11,27 @@
  * Run: node career-ops/normalize-statuses.mjs [--dry-run]
  */
 
-import { readFileSync, writeFileSync, copyFileSync, existsSync, mkdirSync } from 'fs';
+import { readFileSync, copyFileSync, existsSync, mkdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { rebuildRow } from './tracker-utils.mjs';
+import { acquireTrackerLock, trackerLockDirFor, writeFileAtomic } from './tracker-lock.mjs';
 
 const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
-// Support both layouts: data/applications.md (boilerplate) and applications.md (original)
-const APPS_FILE = existsSync(join(CAREER_OPS, 'data/applications.md'))
-  ? join(CAREER_OPS, 'data/applications.md')
-  : join(CAREER_OPS, 'applications.md');
+// Support both layouts: data/applications.md (boilerplate) and applications.md
+// (original). CAREER_OPS_TRACKER lets tests point the script at an isolated
+// fixture so the real user tracker is never touched — merge-tracker.mjs and
+// dedup-tracker.mjs already honour it, and this script not doing so meant any
+// attempt to test it safely silently operated on real career data instead.
+const APPS_FILE = process.env.CAREER_OPS_TRACKER
+  ? process.env.CAREER_OPS_TRACKER
+  : existsSync(join(CAREER_OPS, 'data/applications.md'))
+    ? join(CAREER_OPS, 'data/applications.md')
+    : join(CAREER_OPS, 'applications.md');
 const DRY_RUN = process.argv.includes('--dry-run');
 
-// Ensure required directories exist (fresh setup)
-mkdirSync(join(CAREER_OPS, 'data'), { recursive: true });
+// Ensure the target tracker directory exists in both normal and fixture mode.
+mkdirSync(dirname(APPS_FILE), { recursive: true });
 
 // Canonical status mapping
 function normalizeStatus(raw) {
@@ -92,6 +99,24 @@ if (!existsSync(APPS_FILE)) {
   console.log('No applications.md found. Nothing to normalize.');
   process.exit(0);
 }
+// Take the tracker lock BEFORE reading, so the critical section covers the whole
+// read/modify/write. Reading outside it lets a merge that lands in between be
+// erased by this script's write. A dry run changes nothing and needs no lock.
+let trackerLock;
+if (!DRY_RUN) {
+  try {
+    trackerLock = await acquireTrackerLock(trackerLockDirFor(APPS_FILE), {
+      timeoutMs: Number(process.env.CAREER_OPS_TRACKER_LOCK_TIMEOUT_MS) || 60_000,
+      tracker: APPS_FILE,
+    });
+    process.once('exit', () => trackerLock?.release());
+    if (trackerLock.waitMs > 0) console.log(`🔒 Tracker lock acquired (waited ${trackerLock.waitMs}ms)`);
+  } catch (err) {
+    console.error(`❌ ${err.message}`);
+    process.exit(1);
+  }
+}
+
 const content = readFileSync(APPS_FILE, 'utf-8');
 const lines = content.split('\n');
 
@@ -159,7 +184,9 @@ console.log(`\n📊 ${changes} statuses normalized`);
 if (!DRY_RUN && changes > 0) {
   // Backup first
   copyFileSync(APPS_FILE, APPS_FILE + '.bak');
-  writeFileSync(APPS_FILE, lines.join('\n'));
+  // Atomic: readers take no lock, so a plain writeFileSync can expose a
+  // half-written table to anything reading concurrently.
+  writeFileAtomic(APPS_FILE, lines.join('\n'));
   console.log('✅ Written to applications.md (backup: applications.md.bak)');
 } else if (DRY_RUN) {
   console.log('(dry-run — no changes written)');
