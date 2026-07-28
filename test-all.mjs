@@ -5392,6 +5392,7 @@ for (const suite of [
   'test-trust-validator.mjs',
   'test-tracker-lock.mjs',
   'test-tracker-store.mjs',
+  'test-tracker-api.mjs',
 ]) {
   const suitePath = join(ROOT, suite);
   if (!existsSync(suitePath)) { warn(`${suite} not found — skipped`); continue; }

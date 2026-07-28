@@ -27,6 +27,7 @@ import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
 import { timingSafeEqual } from 'node:crypto';
 import { rejectPrivateOrInvalid } from './liveness-browser.mjs';
+import { createTrackerRoutes } from './tracker-routes.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.CAREEROPS_INGEST_PORT || 8765);
@@ -229,6 +230,31 @@ function send(res, status, body) {
   res.end(payload);
 }
 
+// Collect a JSON body (or {} for GET/empty) and hand it to `next`. Shares the
+// same byte cap as /ingest; malformed JSON answers 400 and never calls `next`.
+function readJsonBody(req, res, next) {
+  if (req.method === 'GET' || req.method === 'HEAD') return next({});
+  let raw = '';
+  let tooBig = false;
+  req.on('data', (chunk) => {
+    raw += chunk;
+    if (raw.length > MAX_BODY_BYTES) { tooBig = true; req.destroy(); }
+  });
+  req.on('end', () => {
+    if (tooBig) return send(res, 413, { error: 'body too large' });
+    try {
+      next(raw ? JSON.parse(raw) : {});
+    } catch {
+      send(res, 400, { error: 'invalid JSON' });
+    }
+  });
+  req.on('error', () => send(res, 400, { error: 'request aborted' }));
+}
+
+// Tracker API. The batch helpers are injected so the routes stay free of
+// ingest-server internals and can be tested without a socket.
+const trackerRoutes = createTrackerRoutes({ appendRow, nextId, isDuplicate, drain, log });
+
 // ── server ───────────────────────────────────────────────────────────────────
 
 const server = http.createServer((req, res) => {
@@ -254,6 +280,27 @@ const server = http.createServer((req, res) => {
     }
     if (!payload) return send(res, 404, { found: false, id: Number(id) });
     return send(res, 200, payload);
+  }
+
+  // ── /tracker/* — read and mutate the application tracker ───────────────────
+  // This process is the SOLE tracker writer. It shares a PID namespace and /tmp
+  // with merge-tracker.mjs and batch-runner.sh, which is what makes the shared
+  // lock correct; the web UI and MCP server proxy here rather than writing the
+  // files themselves. Same bearer gate as /ingest.
+  if (path.startsWith('/tracker/')) {
+    if (!TOKEN) return send(res, 503, { error: 'ingest not configured (missing token)' });
+    if (!tokenOk(req.headers.authorization)) return send(res, 401, { error: 'unauthorized' });
+
+    const query = new URLSearchParams((req.url || '').split('?')[1] || '');
+    readJsonBody(req, res, (parsed) => {
+      trackerRoutes(req.method, path, query, parsed, req.headers)
+        .then((r) => send(res, r.status, r.body))
+        .catch((err) => {
+          console.error('[ingest] tracker route failed:', err.stack || err.message);
+          send(res, 500, { error: 'tracker_failed', message: err.message });
+        });
+    });
+    return;
   }
 
   if (req.method !== 'POST' || path !== '/ingest') {
