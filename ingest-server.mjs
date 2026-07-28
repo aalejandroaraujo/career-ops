@@ -28,6 +28,7 @@ import { spawn } from 'node:child_process';
 import { timingSafeEqual } from 'node:crypto';
 import { rejectPrivateOrInvalid } from './liveness-browser.mjs';
 import { createTrackerRoutes } from './tracker-routes.mjs';
+import { readTracker } from './tracker-store.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.CAREEROPS_INGEST_PORT || 8765);
@@ -168,6 +169,26 @@ function parseMachineSummary(md) {
   };
 }
 
+// Bridge the two id spaces: a finished batch job knows its report number, and
+// the tracker row that report belongs to carries the app_uid. Without this a
+// caller finishing an evaluation has no way to reach the row it just created
+// except by guessing, which is how a batch id ends up passed to update_status.
+// Matched on the report number inside the row's markdown link, guarded by an
+// exact bracket match so [23] cannot match [234].
+function appUidForReport(reportNum) {
+  const num = clean(reportNum);
+  if (!num) return null;
+  try {
+    const { rows } = readTracker();
+    const wanted = String(Number(num)); // tolerate zero-padding: 024 === 24
+    for (const r of rows) {
+      const m = String(r.report).match(/\[(\d+)\]/);
+      if (m && String(Number(m[1])) === wanted) return r.uid;
+    }
+  } catch { /* tracker unreadable — fall through */ }
+  return null;
+}
+
 // Full result: status + parsed evaluation once completed.
 function evaluationPayload(id) {
   const base = statusPayload(id);
@@ -176,7 +197,14 @@ function evaluationPayload(id) {
   const file = findReportFile(base.report_num);
   if (!file) return { ...base, evaluation: null, message: 'completed but report file not found' };
   const summary = parseMachineSummary(readFileSync(file, 'utf8'));
-  return { ...base, report_path: `reports/${basename(file)}`, evaluation: summary };
+  return {
+    ...base,
+    report_path: `reports/${basename(file)}`,
+    // The tracker row this evaluation produced. Use THIS for update_status /
+    // add_note — never the numeric job id above.
+    app_uid: appUidForReport(base.report_num),
+    evaluation: summary,
+  };
 }
 
 function appendRow(id, url, note) {

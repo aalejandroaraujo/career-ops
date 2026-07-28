@@ -40,8 +40,8 @@ const log = (m) => console.log(`[mcp] ${new Date().toISOString()} ${m}`);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // ── call the ingest server (holds the raw token; the MCP client never sees it) ──
-async function ingest(path, { method = 'GET', body } = {}) {
-  const headers = { authorization: `Bearer ${INGEST_TOKEN}` };
+async function ingest(path, { method = 'GET', body, headers: extra } = {}) {
+  const headers = { authorization: `Bearer ${INGEST_TOKEN}`, ...extra };
   if (body !== undefined) headers['content-type'] = 'application/json';
   let res;
   try {
@@ -73,6 +73,50 @@ const asText = (obj, isError = false) => ({ content: [{ type: 'text', text: JSON
 
 const idSchema = z.union([z.number().int().positive(), z.string().regex(/^\d+$/)])
   .describe('The job id returned by evaluate_url.');
+
+// ── two id spaces, deliberately impossible to confuse ────────────────────────
+// `job_id` is a small integer identifying a BATCH EVALUATION (from evaluate_url
+// / create_application_from_jd). `app_uid` is a ca_-prefixed ULID identifying a
+// TRACKER ROW. They are unrelated: report 024 carries Batch ID 17 while sitting
+// at tracker row #24. A model that passes one where the other is expected would
+// mutate the wrong application, so the regex rejects integers outright rather
+// than coercing. Never widen this to accept a number.
+const APP_UID_RE = /^ca_[0-9A-HJKMNP-TV-Z]{26}$/;
+const appUidSchema = z.string().regex(APP_UID_RE,
+  'must be a tracker app_uid like "ca_01J...", NOT a numeric job id from evaluate_url')
+  .describe('Tracker row id: "ca_" + 26 chars, from list_applications or search_applications. NOT the numeric job id returned by evaluate_url.');
+
+/**
+ * Call a /tracker/* route and map the response into a tool result.
+ *
+ * Tool responses carry both `rows` (authoritative data to reason over) and
+ * `markdown` (a ready-to-send pipe table). The Hermes gateway runs with
+ * rich_messages enabled and renders real Markdown tables natively, and the 9B
+ * local model driving it will not reliably hand-build valid table syntax — so
+ * handing it a correct one to forward removes that failure mode.
+ *
+ * @param {string} path - Tracker route, e.g. '/tracker/summary'.
+ * @param {object} [opts] - fetch options passed through to ingest().
+ * @returns {Promise<object>} Tool result payload.
+ */
+async function tracker(path, opts = {}) {
+  const { status, json } = await ingest(path, {
+    ...opts,
+    headers: { 'x-actor': 'hermes' },
+  });
+  if (status === 0) return { error: 'unreachable', message: json.message };
+  if (status === 401) return { error: 'unauthorized' };
+  if (status === 503) return { error: 'not_configured', message: json.error };
+  if (status === 409 && json.error === 'etag_mismatch') {
+    return {
+      error: 'conflict',
+      message: 'This application changed since it was last read (a batch re-evaluation probably updated it). Re-read it with get_application and apply the change again.',
+      current: json.current,
+    };
+  }
+  if (status >= 400) return { error: json.error || 'request_failed', ...json };
+  return json;
+}
 
 function buildServer() {
   const server = new McpServer({ name: 'career-ops', version: '1.0.0' });
@@ -138,6 +182,177 @@ function buildServer() {
       await sleep(WAIT_POLL_MS);
     }
     return asText({ id, status: 'running', message: 'still evaluating past the wait cap — call get_evaluation later', duplicate: sub.duplicate || false });
+  });
+
+  // ── tracker tools ─────────────────────────────────────────────────────────
+  // Everything below reads or writes the SAME store the web UI uses, via the
+  // /tracker/* API on the ingest server. Neither front door touches the files
+  // directly, which is what keeps them from diverging.
+
+  server.registerTool('list_applications', {
+    title: 'List tracked job applications',
+    description: [
+      'List the user\'s job applications from the career-ops tracker, newest first.',
+      '',
+      'WHEN TO USE: "show me my applications", "what am I waiting on", "share a table of all ongoing applications", "how many did I apply to".',
+      'Set ongoing=true for live processes only (Applied, Responded, Interview, Offer) — that is what "ongoing", "active", "in progress" and "still open" mean.',
+      'Use `status` for one exact state. Use search_applications instead when looking for a specific company or keyword.',
+      '',
+      'RETURNS both `rows` (structured, for reasoning) and `markdown` (a ready-to-send Markdown pipe table). When the user just wants to see the list, send the `markdown` value verbatim — do not rebuild the table yourself.',
+      'Each row carries `app_uid` — pass that to update_status, add_note or get_application.',
+    ].join('\n'),
+    inputSchema: {
+      ongoing: z.boolean().optional().describe('Only live processes: Applied, Responded, Interview, Offer.'),
+      status: z.string().optional().describe('One canonical status: Evaluated, Applied, Responded, Interview, Offer, Rejected, Discarded, SKIP.'),
+      limit: z.number().int().positive().optional().describe('Cap the number of rows returned.'),
+    },
+  }, async ({ ongoing, status, limit }) => {
+    const q = new URLSearchParams();
+    if (ongoing) q.set('ongoing', '1');
+    if (status) q.set('status', status);
+    if (limit) q.set('limit', String(limit));
+    const r = await tracker(`/tracker/applications?${q}`);
+    return asText(r, Boolean(r.error));
+  });
+
+  server.registerTool('search_applications', {
+    title: 'Search tracked applications by keyword',
+    description: [
+      'Free-text search across company, role and notes of every tracked application, including closed ones.',
+      '',
+      'WHEN TO USE: "what did I decide about LGT", "did I apply to any banks", "find that Zurich role", "what happened with the AWS applications".',
+      'Matches substrings case-insensitively, so a company name also matches applications that merely MENTION it in their notes — say so if the results look broader than expected.',
+      'Returns the same {rows, markdown} shape as list_applications; send `markdown` verbatim when the user wants to see them.',
+    ].join('\n'),
+    inputSchema: {
+      q: z.string().min(2).describe('Search text: a company, role, technology or phrase from the notes.'),
+      limit: z.number().int().positive().optional(),
+    },
+  }, async ({ q, limit }) => {
+    const p = new URLSearchParams({ q });
+    if (limit) p.set('limit', String(limit));
+    const r = await tracker(`/tracker/applications?${p}`);
+    return asText(r, Boolean(r.error));
+  });
+
+  server.registerTool('get_application', {
+    title: 'Get one application with its full history',
+    description: [
+      'Fetch a single tracked application: all its columns plus the complete timeline of status changes and notes, oldest first.',
+      '',
+      'WHEN TO USE: the user asks about one specific application in depth — "what is the status of the Sunrise role", "remind me what I noted about EPAM", "when did I apply there".',
+      'Also call this before update_status when you need to tell the user what the current status is first.',
+      'Takes app_uid (a "ca_..." tracker id), NOT the numeric job id from evaluate_url.',
+    ].join('\n'),
+    inputSchema: { app_uid: appUidSchema },
+  }, async ({ app_uid }) => {
+    const r = await tracker(`/tracker/applications/${encodeURIComponent(app_uid)}`);
+    return asText(r, Boolean(r.error));
+  });
+
+  server.registerTool('update_status', {
+    title: 'Change an application\'s status',
+    description: [
+      'Move a tracked application to a different status, optionally attaching a note explaining the change.',
+      '',
+      'WHEN TO USE: "I applied to X", "they rejected me", "I have an interview with Y", "change the status of the Acme app to first interview passed".',
+      '',
+      'IMPORTANT — status must be ONE of exactly eight canonical values:',
+      '  Evaluated · Applied · Responded · Interview · Offer · Rejected · Discarded · SKIP',
+      'Richer detail does NOT go in the status. "first interview passed, now waiting on the next round" means status="Interview" with that sentence as `note`. The note is kept in the application\'s permanent history; the status stays machine-readable.',
+      'If unsure which canonical status a phrase maps to, call get_application first and tell the user what you intend to set.',
+      'Takes app_uid (a "ca_..." tracker id), NOT the numeric job id from evaluate_url.',
+    ].join('\n'),
+    inputSchema: {
+      app_uid: appUidSchema,
+      status: z.enum(['Evaluated', 'Applied', 'Responded', 'Interview', 'Offer', 'Rejected', 'Discarded', 'SKIP'])
+        .describe('The new canonical status. Detail belongs in `note`, not here.'),
+      note: z.string().optional().describe('Free text explaining the change, e.g. "1st interview passed, waiting on next round". Stored in the history, never overwritten.'),
+    },
+  }, async ({ app_uid, status, note }) => {
+    const r = await tracker(`/tracker/applications/${encodeURIComponent(app_uid)}/status`, {
+      method: 'POST', body: { to: status, note },
+    });
+    return asText(r, Boolean(r.error));
+  });
+
+  server.registerTool('add_note', {
+    title: 'Add a note to an application',
+    description: [
+      'Append a timestamped note to a tracked application\'s history, without changing its status.',
+      '',
+      'WHEN TO USE: the user shares an update that is not a status change — "recruiter said they will decide next week", "the HM mentioned the team is 6 people", "salary discussion scheduled".',
+      'If the update DOES imply a new status, use update_status with a note instead — one call, not two.',
+      'Notes are permanent and are never overwritten by a re-evaluation.',
+    ].join('\n'),
+    inputSchema: {
+      app_uid: appUidSchema,
+      text: z.string().min(1).describe('The note. Written verbatim into the application history.'),
+    },
+  }, async ({ app_uid, text }) => {
+    const r = await tracker(`/tracker/applications/${encodeURIComponent(app_uid)}/notes`, {
+      method: 'POST', body: { text },
+    });
+    return asText(r, Boolean(r.error));
+  });
+
+  server.registerTool('applications_summary', {
+    title: 'Job search funnel summary',
+    description: [
+      'Counts by status plus response and interview rates across the whole search.',
+      '',
+      'WHEN TO USE: "how is my job search going", "how many applications do I have out", "what is my response rate", "give me a summary".',
+      'Returns counts, applied_total, response_rate and interview_rate (percentages of applications actually sent), plus a `markdown` table you can forward verbatim.',
+      'For "what needs chasing", use applications_needing_followup instead.',
+    ].join('\n'),
+    inputSchema: {},
+  }, async () => {
+    const r = await tracker('/tracker/summary');
+    return asText(r, Boolean(r.error));
+  });
+
+  server.registerTool('applications_needing_followup', {
+    title: 'Applications that are overdue a follow-up',
+    description: [
+      'Applications sitting too long without a response, with days elapsed and an urgency label.',
+      '',
+      'WHEN TO USE: "what needs a follow-up", "who should I chase", "anything gone quiet", "what am I waiting on that is overdue".',
+      'Ordered by staleness, most overdue first. Returns `rows` plus a `markdown` table to forward verbatim.',
+      'Use `days` to only show applications older than a threshold.',
+    ].join('\n'),
+    inputSchema: {
+      days: z.number().int().nonnegative().optional().describe('Only include applications at least this many days old.'),
+    },
+  }, async ({ days }) => {
+    const q = days ? `?days=${days}` : '';
+    const r = await tracker(`/tracker/followups${q}`);
+    return asText(r, Boolean(r.error));
+  });
+
+  server.registerTool('create_application_from_jd', {
+    title: 'Evaluate a job description pasted as text',
+    description: [
+      'Submit a job description as TEXT (not a URL) for full evaluation. career-ops saves it, scores the fit, writes a report and adds it to the tracker — the same pipeline evaluate_url uses.',
+      '',
+      'WHEN TO USE: the user pastes the body of a job ad, forwards a recruiter message containing the role description, or says "evaluate this JD" with the text inline.',
+      'If they give a URL instead, use evaluate_url — do not paste page text you fetched yourself.',
+      'Include company and role when you can infer them from the text; they make the saved file and the report easier to find.',
+      '',
+      'Needs a real job description (at least ~100 characters of actual role content). If the user sent only a title or a fragment, ask for the full text rather than submitting it.',
+      'Returns a numeric `job_id` for get_status / get_evaluation. That is a BATCH id — it is NOT an app_uid and must never be passed to update_status.',
+      'Evaluation takes a few minutes; poll get_status.',
+    ].join('\n'),
+    inputSchema: {
+      jd_text: z.string().min(100).describe('The full job description text, verbatim.'),
+      company: z.string().optional().describe('Company name, if known.'),
+      role: z.string().optional().describe('Job title, if known.'),
+      source_url: z.string().optional().describe('Where it came from, if known — recorded but not fetched.'),
+    },
+  }, async ({ jd_text, company, role, source_url }) => {
+    const r = await tracker('/tracker/jd-text', {
+      method: 'POST', body: { jd_text, company, role, source_url },
+    });
+    return asText(r, Boolean(r.error));
   });
 
   return server;
