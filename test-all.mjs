@@ -5260,6 +5260,33 @@ try {
   fail(`weworkremotely provider tests crashed: ${e.message}`);
 }
 
+// ── FOCUSED SUITES ──────────────────────────────────────────────
+// Feature-specific suites live in their own files so they can be run alone
+// while iterating. They are executed here because CI runs ONLY this file
+// (.github/workflows/test.yml) — a suite that is not listed below never runs.
+// test-salary-filter.mjs and test-trust-validator.mjs were orphaned this way
+// for their whole lifetime; do not add a suite without registering it here.
+
+console.log('\n33. Focused suites');
+for (const suite of [
+  'test-salary-filter.mjs',
+  'test-trust-validator.mjs',
+  'test-tracker-lock.mjs',
+  'test-tracker-store.mjs',
+]) {
+  const suitePath = join(ROOT, suite);
+  if (!existsSync(suitePath)) { warn(`${suite} not found — skipped`); continue; }
+  try {
+    const out = execFileSync(NODE, [suitePath], { cwd: ROOT, encoding: 'utf-8', stdio: 'pipe' });
+    const m = out.match(/(\d+) passed, (\d+) failed/);
+    pass(`${suite}: ${m ? `${m[1]} passed` : 'passed'}`);
+  } catch (e) {
+    const out = `${e.stdout || ''}${e.stderr || ''}`;
+    const failing = out.split('\n').filter(l => l.includes('❌')).slice(0, 5);
+    fail(`${suite} FAILED:\n${failing.map(l => `      ${l.trim()}`).join('\n') || `      ${e.message}`}`);
+  }
+}
+
 // ── SUMMARY ─────────────────────────────────────────────────────
 
 console.log('\n' + '='.repeat(50));

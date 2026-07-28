@@ -14,14 +14,19 @@
  * Run: node career-ops/merge-tracker.mjs [--dry-run] [--verify]
  */
 
-import { readFileSync, writeFileSync, readdirSync, mkdirSync, renameSync, existsSync, rmSync, statSync, realpathSync } from 'fs';
-import { join, basename, dirname, resolve, relative, isAbsolute, sep } from 'path';
+import { readFileSync, readdirSync, mkdirSync, renameSync, existsSync } from 'fs';
+import { join, basename, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { execFileSync } from 'child_process';
-import { createHash, randomUUID } from 'crypto';
-import { tmpdir } from 'os';
 import { normalizeReportLink as normalizeLink } from './tracker-links.mjs';
 import { roleFuzzyMatch } from './role-matcher.mjs';
+import {
+  acquireTrackerLock,
+  canonicalizeTrackerPath,
+  trackerLockDirFor,
+  writeFileAtomic,
+} from './tracker-lock.mjs';
+import { newUid } from './tracker-store.mjs';
 
 const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
 // Support both layouts: data/applications.md (boilerplate) and applications.md (original).
@@ -44,8 +49,10 @@ const MIGRATE = process.argv.includes('--migrate');
 const MERGE_HOLD_MS = Number(process.env.CAREER_OPS_MERGE_HOLD_MS) || 0;
 const MERGE_READY_IPC = process.env.CAREER_OPS_MERGE_READY_IPC === '1';
 
-const trackerLockKey = createHash('sha256').update(APPS_FILE).digest('hex').slice(0, 16);
-const TRACKER_LOCK_DIR = resolveTrackerLockDir(process.env.CAREER_OPS_TRACKER_LOCK, trackerLockKey);
+// Derived by the shared module so every tracker writer agrees on the same lock
+// directory for the same file — an inconsistent key would silently hand two
+// writers two different locks over one tracker.
+const TRACKER_LOCK_DIR = trackerLockDirFor(APPS_FILE);
 
 // The reports/ dir sits at the repo root, which is the tracker's parent in the
 // data/ layout (data/applications.md) and the tracker's own dir at root layout.
@@ -68,76 +75,14 @@ const normalizeReportLink = (reportField) => normalizeLink(reportField, TRACKER_
 mkdirSync(join(CAREER_OPS, 'data'), { recursive: true });
 mkdirSync(ADDITIONS_DIR, { recursive: true });
 
-/**
- * Convert the tracker path into one stable absolute spelling before hashing it.
- *
- * Equivalent tracker paths can be written in multiple ways, such as a relative
- * path from the current shell, an absolute path, or a path that travels through
- * a symlink. The lock key must be based on one canonical spelling so all merge
- * processes that target the same tracker also target the same lock directory.
- *
- * @param {string} path - Raw tracker path from config, env, or the default.
- * @returns {string} Absolute canonical path when the file exists, else resolved path.
- */
-function canonicalizeTrackerPath(path) {
-  const absolutePath = resolve(path);
-  try {
-    return realpathSync(absolutePath);
-  } catch {
-    return absolutePath;
-  }
-}
-
-/**
- * Check whether one absolute path stays inside another directory.
- *
- * This protects recursive lock cleanup from accepting paths that escape the
- * system temp directory through `..` segments or unrelated absolute roots.
- *
- * @param {string} childPath - Candidate path to validate.
- * @param {string} parentDir - Required parent directory boundary.
- * @returns {boolean} True when childPath is inside parentDir or equal to it.
- */
-function pathIsInside(childPath, parentDir) {
-  const relativePath = relative(parentDir, childPath);
-  return relativePath === '' || (relativePath !== '..' && !relativePath.startsWith(`..${sep}`) && !isAbsolute(relativePath));
-}
-
-/**
- * Validate and resolve the tracker lock directory.
- *
- * `CAREER_OPS_TRACKER_LOCK` exists for tests and unusual local layouts, but the
- * merge script later removes the lock directory recursively. To keep that safe,
- * env-provided lock paths must be absolute, live under the OS temp directory,
- * and use the career-ops lock-name prefix. Invalid values are ignored and the
- * deterministic temp-dir default is used instead.
- *
- * @param {string|undefined} envValue - Optional lock path override.
- * @param {string} lockKey - Stable tracker hash suffix.
- * @returns {string} Safe lock directory path.
- */
-function resolveTrackerLockDir(envValue, lockKey) {
-  const tmpRoot = realpathSync(tmpdir());
-  const fallback = join(tmpRoot, `career-ops-merge-tracker-${lockKey}.lock`);
-  if (!envValue || !isAbsolute(envValue)) return fallback;
-
-  const candidate = resolve(envValue);
-  const parentDir = dirname(candidate);
-  const canonicalParent = existsSync(parentDir) ? realpathSync(parentDir) : resolve(parentDir);
-  if (!pathIsInside(canonicalParent, tmpRoot)) return fallback;
-  if (!basename(candidate).startsWith('career-ops-merge-tracker-')) return fallback;
-  return candidate;
-}
 
 /**
  * Pause the async merge flow for a fixed number of milliseconds.
  *
- * This is used in two places:
- * - the lock retry loop, where waiting briefly avoids a tight CPU spin while
- *   another `merge-tracker.mjs` process owns the tracker lock;
- * - the regression test hook (`CAREER_OPS_MERGE_HOLD_MS`), which deliberately
- *   holds the first merge after it reads `applications.md` so a second merge can
- *   try to enter the same critical section.
+ * Used by the regression test hook (`CAREER_OPS_MERGE_HOLD_MS`), which
+ * deliberately holds the first merge after it reads `applications.md` so a
+ * second merge can try to enter the same critical section. The lock's own
+ * retry backoff now lives in tracker-lock.mjs.
  *
  * @param {number} ms - Milliseconds to wait before resolving.
  * @returns {Promise<void>} Resolves after the requested delay.
@@ -146,174 +91,7 @@ function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-/**
- * Determine whether a process id still belongs to a live process.
- *
- * The tracker lock stores the owner PID in `owner.json`. When another process
- * finds an existing lock, this check lets it distinguish a valid live owner from
- * a crashed process that left a stale lock directory behind. `EPERM` counts as
- * alive because the process exists even if the current user cannot signal it.
- *
- * @param {number} pid - Process id recorded by the lock owner.
- * @returns {boolean} True when the process appears to still exist.
- */
-function processIsAlive(pid) {
-  if (!Number.isInteger(pid) || pid <= 0) return false;
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (err) {
-    return err?.code === 'EPERM';
-  }
-}
 
-/**
- * Read lock ownership metadata from a tracker lock directory.
- *
- * The metadata contains the owner PID, a unique release token, the acquisition
- * timestamp, and the tracker path. Invalid or missing metadata is treated as
- * unreadable so the stale-lock recovery path can fall back to directory age.
- *
- * @param {string} lockDir - Directory that represents the active lock.
- * @returns {object|null} Parsed owner metadata, or null when unavailable.
- */
-function readLockOwner(lockDir) {
-  try {
-    return JSON.parse(readFileSync(join(lockDir, 'owner.json'), 'utf-8'));
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Decide whether an existing lock can be safely recovered.
- *
- * Recovery is conservative: if the lock has an owner PID and that process is
- * still alive, the lock is never considered stale merely because it is old. If
- * the owner process is gone, or if the metadata cannot be read and the lock
- * directory itself is older than the stale threshold, the waiting process may
- * remove the lock and retry acquisition.
- *
- * @param {string} lockDir - Directory that represents the active lock.
- * @param {number} staleMs - Age threshold for metadata-free lock recovery.
- * @returns {boolean} True when the caller may remove and recreate the lock.
- */
-function lockCanRecover(lockDir, staleMs) {
-  const owner = readLockOwner(lockDir);
-  if (owner?.pid) return !processIsAlive(owner.pid);
-
-  try {
-    return Date.now() - statSync(lockDir).mtimeMs > staleMs;
-  } catch {
-    return true;
-  }
-}
-
-/**
- * Acquire an exclusive filesystem lock for one tracker merge.
- *
- * The critical section must cover the full read/modify/write/move sequence, not
- * just the final write. Otherwise two processes can read the same old tracker
- * snapshot, compute independent updates, and let the later writer erase rows
- * written by the earlier one. The lock is implemented with atomic directory
- * creation, owner metadata, retry/backoff, stale-owner recovery, and a release
- * token so one process cannot delete another process's newer lock.
- *
- * @param {string} lockDir - Directory path used as the lock sentinel.
- * @param {object} [options] - Lock timing options.
- * @param {number} [options.timeoutMs=60000] - Maximum time to wait for the lock.
- * @param {number} [options.retryMs=75] - Delay between acquisition attempts.
- * @param {number} [options.staleMs=600000] - Metadata-free stale-lock threshold.
- * @returns {Promise<{attempts:number,waitMs:number,staleRecovered:boolean,release:Function}>}
- * Lock handle with metadata and an idempotent release method.
- */
-async function acquireTrackerLock(lockDir, options = {}) {
-  const timeoutMs = options.timeoutMs ?? 60_000;
-  const retryMs = options.retryMs ?? 75;
-  const staleMs = options.staleMs ?? 10 * 60_000;
-  const recoverGuardDir = `${lockDir}.recover`;
-  const token = randomUUID();
-  const startedAt = Date.now();
-  let attempts = 0;
-  let staleRecovered = false;
-
-  while (Date.now() - startedAt < timeoutMs) {
-    attempts++;
-    try {
-      mkdirSync(lockDir);
-      writeFileSync(join(lockDir, 'owner.json'), JSON.stringify({
-        pid: process.pid,
-        token,
-        started_at: new Date().toISOString(),
-        tracker: APPS_FILE,
-      }, null, 2));
-
-      let released = false;
-      return {
-        attempts,
-        waitMs: Date.now() - startedAt,
-        staleRecovered,
-        release() {
-          if (released) return;
-          released = true;
-          const owner = readLockOwner(lockDir);
-          if (owner?.token === token) {
-            rmSync(lockDir, { recursive: true, force: true });
-          }
-        },
-      };
-    } catch (err) {
-      if (err?.code !== 'EEXIST') throw err;
-
-      let hasRecoverGuard = false;
-      try {
-        mkdirSync(recoverGuardDir);
-        hasRecoverGuard = true;
-      } catch (guardErr) {
-        if (guardErr?.code !== 'EEXIST') throw guardErr;
-      }
-
-      if (hasRecoverGuard) {
-        try {
-          if (lockCanRecover(lockDir, staleMs)) {
-            rmSync(lockDir, { recursive: true, force: true });
-            staleRecovered = true;
-            continue;
-          }
-        } finally {
-          rmSync(recoverGuardDir, { recursive: true, force: true });
-        }
-      }
-
-      await sleep(retryMs);
-    }
-  }
-
-  throw new Error(`Timed out waiting for tracker merge lock at ${lockDir}`);
-}
-
-/**
- * Replace a tracker file atomically using a same-directory temporary file.
- *
- * Writing into the same directory keeps the final `renameSync` atomic on normal
- * filesystems and avoids exposing a partially written `applications.md` to other
- * readers. If the write or rename fails, the temporary file is cleaned up before
- * the original error is rethrown.
- *
- * @param {string} path - Final file path to replace.
- * @param {string} content - Complete file content to write.
- * @returns {void}
- */
-function writeFileAtomic(path, content) {
-  const tmpPath = join(dirname(path), `.${basename(path)}.${process.pid}.${Date.now()}.${randomUUID()}.tmp`);
-  try {
-    writeFileSync(tmpPath, content);
-    renameSync(tmpPath, path);
-  } catch (err) {
-    rmSync(tmpPath, { force: true });
-    throw err;
-  }
-}
 
 let trackerLock;
 try {
@@ -321,6 +99,7 @@ try {
     timeoutMs: Number(process.env.CAREER_OPS_TRACKER_LOCK_TIMEOUT_MS) || 60_000,
     retryMs: Number(process.env.CAREER_OPS_TRACKER_LOCK_RETRY_MS) || 75,
     staleMs: Number(process.env.CAREER_OPS_TRACKER_LOCK_STALE_MS) || 10 * 60_000,
+    tracker: APPS_FILE,
   });
   process.once('exit', () => trackerLock?.release());
   if (trackerLock.waitMs > 0 || trackerLock.staleRecovered) {
@@ -434,6 +213,7 @@ const HEADER_ALIASES = {
   '#': 'num', 'num': 'num', 'date': 'date', 'company': 'company', 'empresa': 'company',
   'role': 'role', 'puesto': 'role', 'location': 'location', 'score': 'score',
   'status': 'status', 'pdf': 'pdf', 'report': 'report', 'notes': 'notes',
+  'uid': 'uid',
 };
 
 // Scan the table for a header row and build a header-name → column-index map.
@@ -454,12 +234,15 @@ function detectColumns(lines) {
 }
 
 // Build a tracker row string matching the detected layout (with or without the
-// optional Location column) so writes round-trip through the same schema.
+// optional Location and UID columns) so writes round-trip through the same
+// schema. A tracker that has been migrated MUST get a uid on every new row —
+// otherwise the web UI and MCP tools cannot address rows this script creates.
 function buildRow(o) {
-  if (COLMAP.location != null) {
-    return `| ${o.num} | ${o.date} | ${o.company} | ${o.role} | ${o.location || '—'} | ${o.score} | ${o.status} | ${o.pdf} | ${o.report} | ${o.notes} |`;
-  }
-  return `| ${o.num} | ${o.date} | ${o.company} | ${o.role} | ${o.score} | ${o.status} | ${o.pdf} | ${o.report} | ${o.notes} |`;
+  const cells = [o.num, o.date, o.company, o.role];
+  if (COLMAP.location != null) cells.push(o.location || '—');
+  cells.push(o.score, o.status, o.pdf, o.report, o.notes);
+  if (COLMAP.uid != null) cells.push(o.uid || newUid());
+  return `| ${cells.join(' | ')} |`;
 }
 
 /**
@@ -489,6 +272,9 @@ function parseAppLine(line) {
     pdf: parts[COLMAP.pdf],
     report: parts[COLMAP.report],
     notes: COLMAP.notes != null ? (parts[COLMAP.notes] || '') : '',
+    // Carried through re-evaluations so a row keeps its identity when the merge
+    // rewrites it in place — the uid is what the web UI and Hermes address.
+    uid: COLMAP.uid != null ? (parts[COLMAP.uid] || '') : '',
     raw: line,
   };
 }
@@ -735,6 +521,9 @@ for (const file of tsvFiles) {
           score: addition.score, status: duplicate.status, pdf: duplicate.pdf,
           report: addition.report,
           notes: `Re-eval ${addition.date} (${oldScore}→${newScore}). ${addition.notes}`,
+          // Keep the existing identity: a re-eval is the same application, and
+          // its note/status history in app-events.jsonl is keyed on this uid.
+          uid: duplicate.uid,
         });
         appLines[lineIdx] = updatedLine;
         updated++;

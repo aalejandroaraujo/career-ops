@@ -20,6 +20,7 @@
     "scan": "node scan.mjs",
     "ingest": "node ingest-server.mjs",
     "mcp": "node mcp-server.mjs",
+    "tracker:migrate": "node tracker-uid-migrate.mjs",
     "fetch-jd": "node fetch-jd.mjs",
     "scan:full": "node scan-ats-full.mjs",
     "validate:portals": "node validate-portals.mjs",

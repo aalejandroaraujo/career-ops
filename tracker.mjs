@@ -51,8 +51,8 @@ if (resolve(MD_PATH) === resolve(DB_PATH)) {
   process.exit(1);
 }
 const STATES_PATH = 'templates/states.yml';
-const HEADER = '| # | Date | Company | Role | Score | Status | PDF | Report | Notes |';
-const SEPARATOR = '|---|------|---------|------|-------|--------|-----|--------|-------|';
+const HEADER = '| # | Date | Company | Role | Score | Status | PDF | Report | Notes | UID |';
+const SEPARATOR = '|---|------|---------|------|-------|--------|-----|--------|-------|---|';
 
 // ── node:sqlite loading ─────────────────────────────────────────────
 
@@ -92,7 +92,10 @@ function openDb(DatabaseSync) {
       status  TEXT NOT NULL,
       pdf     TEXT NOT NULL DEFAULT '❌',
       report  TEXT NOT NULL DEFAULT '—',
-      notes   TEXT NOT NULL DEFAULT ''
+      notes   TEXT NOT NULL DEFAULT '',
+      -- Stable application id from the markdown's UID column. Empty for rows in
+      -- an un-migrated tracker; the web UI and MCP tools address rows by this.
+      uid     TEXT NOT NULL DEFAULT ''
     );
     CREATE TABLE IF NOT EXISTS status_events (
       id     INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -145,6 +148,9 @@ function normalizeStatus(raw, states) {
 
 const SCORE_RE = /^\*{0,2}(\d(?:\.\d)?\/5)\*{0,2}$/;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+// Stable application id minted by tracker-uid-migrate.mjs / tracker-store.mjs.
+// Crockford base32 ULID, `ca_` prefixed so it cannot be read as a batch job id.
+const UID_CELL_RE = /^ca_[0-9A-HJKMNP-TV-Z]{26}$/;
 
 // Mojibake left by a UTF-8 → GBK → UTF-8 round trip: an em-dash cell becomes
 // "鈥?" / "鈥�" variants. Only short placeholder cells are repaired — free-text
@@ -163,11 +169,18 @@ function parseMarkdownRows(text, diag) {
     let cells = line.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map(c => c.trim());
     if (cells.length < 2) continue;
     if (cells[0] === '#' || /^[-: ]*$/.test(cells.join(''))) continue; // header / separator
+    // A migrated tracker carries a 10th UID column. Identify it by SHAPE rather
+    // than by position: a legacy 9-column row whose notes contain a stray pipe
+    // also yields 10 cells, and folding a real uid into notes (or vice versa)
+    // would corrupt the index. Rows always come out of here as 10 cells.
+    let uid = '';
+    if (cells.length > 9 && UID_CELL_RE.test(cells[cells.length - 1])) uid = cells.pop();
     if (cells.length > 9) {
       cells = [...cells.slice(0, 8), cells.slice(8).join(' | ')]; // stray pipes → notes
       if (diag) diag.strayPipes++;
     }
     while (cells.length < 9) cells.push('');
+    cells.push(uid);
     rows.push(cells);
   }
   return rows;
@@ -211,7 +224,7 @@ function parseTracker(states) {
   const apps = [];
 
   for (const cells of rows) {
-    let [idRaw, date, company, role, score, status, pdf, report, notes] = cells;
+    let [idRaw, date, company, role, score, status, pdf, report, notes, uid] = cells;
 
     const before = [score, pdf, report].join('|');
     score = repairPlaceholder(score);
@@ -247,7 +260,7 @@ function parseTracker(states) {
 
     if (!DATE_RE.test(date)) diag.badDate++; // kept as-is — flagged, not destroyed
 
-    apps.push({ id, pos: apps.length, date, company, role, score: score || '—', status, pdf: pdf || '❌', report: report || '—', notes });
+    apps.push({ id, pos: apps.length, date, company, role, score: score || '—', status, pdf: pdf || '❌', report: report || '—', notes, uid: uid || '' });
   }
   for (const app of apps) if (app.id === 0) app.id = ++maxId;
 
@@ -285,8 +298,8 @@ function syncIndex(db, states) {
   db.exec('PRAGMA defer_foreign_keys = ON'); // full rebuild — FKs settle at commit
   try {
     db.exec('DELETE FROM applications');
-    const insertApp = db.prepare('INSERT INTO applications (id, pos, date, company, role, score, status, pdf, report, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
-    for (const a of apps) insertApp.run(a.id, a.pos, a.date, a.company, a.role, a.score, a.status, a.pdf, a.report, a.notes);
+    const insertApp = db.prepare('INSERT INTO applications (id, pos, date, company, role, score, status, pdf, report, notes, uid) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+    for (const a of apps) insertApp.run(a.id, a.pos, a.date, a.company, a.role, a.score, a.status, a.pdf, a.report, a.notes, a.uid);
 
     // Status history: events persist across rebuilds, keyed by id. An app whose
     // status changed since the last sync gets a new event; rows that left the
@@ -356,7 +369,7 @@ function flagValue(args, flag) {
 
 function rowToMarkdown(r) {
   const clean = (v) => String(v ?? '').replace(/\|/g, '│').replace(/\r?\n/g, ' ');
-  return `| ${r.id} | ${clean(r.date)} | ${clean(r.company)} | ${clean(r.role)} | ${clean(r.score)} | ${clean(r.status)} | ${clean(r.pdf)} | ${clean(r.report)} | ${clean(r.notes)} |`;
+  return `| ${r.id} | ${clean(r.date)} | ${clean(r.company)} | ${clean(r.role)} | ${clean(r.score)} | ${clean(r.status)} | ${clean(r.pdf)} | ${clean(r.report)} | ${clean(r.notes)} | ${clean(r.uid)} |`;
 }
 
 async function query(args) {
