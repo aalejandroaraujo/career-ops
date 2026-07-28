@@ -21,8 +21,8 @@
  */
 
 import http from 'node:http';
-import { existsSync, readFileSync, appendFileSync, writeFileSync } from 'node:fs';
-import { join, dirname } from 'node:path';
+import { existsSync, readFileSync, appendFileSync, writeFileSync, readdirSync } from 'node:fs';
+import { join, dirname, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
 import { timingSafeEqual } from 'node:crypto';
@@ -37,6 +37,7 @@ const INPUT_FILE = join(ROOT, 'batch', 'batch-input.tsv');
 const STATE_FILE = join(ROOT, 'batch', 'batch-state.tsv');
 const SCAN_HISTORY = join(ROOT, 'data', 'scan-history.tsv');
 const APPLICATIONS = join(ROOT, 'data', 'applications.md');
+const REPORTS_DIR = join(ROOT, 'reports');
 const INPUT_HEADER = 'id\turl\tsource\tnotes';
 
 // ── helpers ────────────────────────────────────────────────────────────────
@@ -73,6 +74,108 @@ function isDuplicate(url) {
     if (existsSync(APPLICATIONS) && readFileSync(APPLICATIONS, 'utf8').includes(url)) return true;
   } catch { /* ignore */ }
   return false;
+}
+
+// ── status / evaluation lookups ──────────────────────────────────────────────
+// batch-state.tsv columns: id url status started_at completed_at report_num score error retries
+function readStateRow(id) {
+  for (const line of readLines(STATE_FILE)) {
+    const c = line.split('\t');
+    if (c[0]?.trim() === String(id)) {
+      return {
+        id: c[0]?.trim(), url: c[1], status: c[2], started_at: c[3], completed_at: c[4],
+        report_num: c[5], score: c[6], error: c[7], retries: c[8],
+      };
+    }
+  }
+  return null;
+}
+
+function readInputRow(id) {
+  for (const line of readLines(INPUT_FILE)) {
+    const c = line.split('\t');
+    if (c[0]?.trim() === String(id)) return { id: c[0]?.trim(), url: c[1], source: c[2], notes: c[3] };
+  }
+  return null;
+}
+
+const clean = (v) => (v && String(v).trim() && String(v).trim() !== '-' ? String(v).trim() : null);
+
+// Reverse lookup: find the prior job row for a URL (batch-state.tsv col 1 = url),
+// so a duplicate submission can still be fetched via /status and /evaluation.
+function findStateByUrl(url) {
+  for (const line of readLines(STATE_FILE)) {
+    const c = line.split('\t');
+    if (c[1]?.trim() === url) {
+      const id = clean(c[0]);
+      return { id: id ? Number(id) : null, report_num: clean(c[5]) };
+    }
+  }
+  return null;
+}
+
+// Light status: queued → processing → completed | failed | rate_limited.
+function statusPayload(id) {
+  const s = readStateRow(id);
+  if (s) {
+    const scoreStr = clean(s.score);
+    return {
+      found: true, id: Number(id), status: s.status,
+      done: s.status === 'completed',
+      score: scoreStr !== null && !Number.isNaN(Number(scoreStr)) ? Number(scoreStr) : null,
+      report_num: clean(s.report_num), url: s.url, error: clean(s.error),
+    };
+  }
+  const inp = readInputRow(id);
+  if (inp) return { found: true, id: Number(id), status: 'queued', done: false, url: inp.url };
+  return null; // → 404
+}
+
+function findReportFile(reportNum) {
+  const num = clean(reportNum);
+  if (!num) return null;
+  try {
+    const f = readdirSync(REPORTS_DIR).find(n => n.startsWith(`${num}-`) && n.endsWith('.md'));
+    return f ? join(REPORTS_DIR, f) : null;
+  } catch { return null; }
+}
+
+// Minimal, dependency-free extraction of the report's `## Machine Summary` YAML.
+function parseMachineSummary(md) {
+  const idx = md.indexOf('## Machine Summary');
+  if (idx === -1) return {};
+  const m = md.slice(idx).match(/```ya?ml\s*([\s\S]*?)```/);
+  if (!m) return {};
+  const yaml = m[1];
+  const scalar = (key) => {
+    const r = yaml.match(new RegExp(`^${key}:\\s*"?(.*?)"?\\s*$`, 'm'));
+    return r && r[1] ? r[1].trim() : null;
+  };
+  const list = (key) => {
+    const r = yaml.match(new RegExp(`^${key}:\\s*\\n((?:[ \\t]+-[ \\t].*\\n?)+)`, 'm'));
+    if (!r) return [];
+    return r[1].split('\n').map(l => l.replace(/^[ \t]*-[ \t]*/, '').replace(/^"|"$/g, '').trim()).filter(Boolean);
+  };
+  const scoreStr = scalar('score');
+  return {
+    company: scalar('company'), role: scalar('role'),
+    score: scoreStr !== null && !Number.isNaN(Number(scoreStr)) ? Number(scoreStr) : scoreStr,
+    legitimacy_tier: scalar('legitimacy_tier'), archetype: scalar('archetype'),
+    final_decision: scalar('final_decision'), risk_level: scalar('risk_level'),
+    next_action: scalar('next_action'),
+    top_strengths: list('top_strengths'), hard_stops: list('hard_stops'), soft_gaps: list('soft_gaps'),
+  };
+}
+
+// Full result: status + parsed evaluation once completed.
+function evaluationPayload(id) {
+  const base = statusPayload(id);
+  if (!base) return null;
+  if (!base.done) return { ...base, evaluation: null, message: `not ready — still ${base.status}` };
+  const file = findReportFile(base.report_num);
+  if (!file) return { ...base, evaluation: null, message: 'completed but report file not found' };
+  const summary = parseMachineSummary(readFileSync(file, 'utf8'));
+  return { ...base, report_path: `reports/${basename(file)}`, evaluation: summary };
 }
 
 function appendRow(id, url, note) {
@@ -129,11 +232,31 @@ function send(res, status, body) {
 // ── server ───────────────────────────────────────────────────────────────────
 
 const server = http.createServer((req, res) => {
-  if (req.method === 'GET' && req.url === '/health') {
+  const path = (req.url || '').split('?')[0];
+
+  if (req.method === 'GET' && path === '/health') {
     return send(res, 200, { ok: true, configured: Boolean(TOKEN) });
   }
 
-  if (req.method !== 'POST' || req.url !== '/ingest') {
+  // GET /status/:id and GET /evaluation/:id — token-gated, same as /ingest.
+  const statusMatch = req.method === 'GET' && path.match(/^\/status\/(\d+)$/);
+  const evalMatch = req.method === 'GET' && path.match(/^\/evaluation\/(\d+)$/);
+  if (statusMatch || evalMatch) {
+    if (!TOKEN) return send(res, 503, { error: 'ingest not configured (missing token)' });
+    if (!tokenOk(req.headers.authorization)) return send(res, 401, { error: 'unauthorized' });
+    const id = (statusMatch || evalMatch)[1];
+    let payload;
+    try {
+      payload = statusMatch ? statusPayload(id) : evaluationPayload(id);
+    } catch (err) {
+      console.error('[ingest] lookup failed:', err.message);
+      return send(res, 500, { error: 'lookup failed' });
+    }
+    if (!payload) return send(res, 404, { found: false, id: Number(id) });
+    return send(res, 200, payload);
+  }
+
+  if (req.method !== 'POST' || path !== '/ingest') {
     return send(res, 404, { error: 'not found' });
   }
 
@@ -165,8 +288,9 @@ const server = http.createServer((req, res) => {
     if (guard) return send(res, 400, { error: 'rejected url', code: guard.code, reason: guard.reason });
 
     if (isDuplicate(url)) {
-      log(`duplicate: ${url}`);
-      return send(res, 200, { accepted: false, duplicate: true, url });
+      const prior = findStateByUrl(url);
+      log(`duplicate: ${url}${prior?.id ? ` (id ${prior.id})` : ''}`);
+      return send(res, 200, { accepted: false, duplicate: true, url, id: prior?.id ?? null, report_num: prior?.report_num ?? null });
     }
 
     const id = nextId();

@@ -48,6 +48,41 @@ services:
       - default
       - careerops-bridge
 
+  # MCP server — lets Hermes call career-ops as a native MCP tool (no shell needed).
+  # Thin proxy over the ingest server; holds the ingest token so Hermes never sees it.
+  # Reachable two ways: on careerops-bridge at http://career-ops-mcp:8766/mcp (for
+  # bridge peers), AND on the host loopback at http://127.0.0.1:8766/mcp (for the
+  # host-side Hermes agent, which runs as a `hermes` systemd --user process and can't
+  # resolve the bridge DNS name). Loopback-only bind keeps it off the LAN; pair with
+  # CAREEROPS_MCP_TOKEN (set in .env) for a bearer on the endpoint.
+  career-ops-mcp:
+    image: career-ops:local
+    container_name: career-ops-mcp
+    working_dir: /app
+    user: "1000:1000"
+    command: ["npm", "run", "mcp"]
+    init: true
+    # Loopback-only host port so the host-side Hermes agent can reach the MCP server.
+    ports:
+      - "127.0.0.1:8766:8766"
+    depends_on:
+      - career-ops
+    volumes:
+      - .:/app
+      - career-ops-node-modules:/app/node_modules
+    environment:
+      - NODE_ENV=development
+      # Where to reach the ingest server (same bridge network).
+      - CAREEROPS_INGEST_BASE=http://career-ops:8765
+      # Server-side token used to call the ingest server (never exposed to the MCP client).
+      - CAREEROPS_INGEST_TOKEN=${CAREEROPS_INGEST_TOKEN:-}
+      # Optional inbound bearer for the MCP endpoint (defense-in-depth). If unset,
+      # the only boundary is the internal careerops-bridge network (no host port).
+      - CAREEROPS_MCP_TOKEN=${CAREEROPS_MCP_TOKEN:-}
+    restart: unless-stopped
+    networks:
+      - careerops-bridge
+
 volumes:
   career-ops-node-modules:
   # Container-owned Claude Code home (holds the in-container `claude /login`

@@ -23,8 +23,23 @@ Telegram ─▶ Hermes ─▶ POST http://career-ops:8765/ingest {url,note}
   `data/applications.md`, appends a row to `batch/batch-input.tsv`, and fires a
   **single-flight** `batch-runner.sh` drain. Returns `202 {accepted, id}`.
 - `GET /health` → `200 {ok, configured}`.
+- `GET /status/:id` (bearer token) → light poll of one job:
+  `{found, id, status, done, score, report_num, url, error}`. `status` is one of
+  `queued → processing → completed | failed | rate_limited`. Reads
+  `batch/batch-state.tsv` (+ `batch-input.tsv` for the `queued` phase). `404
+  {found:false}` for an unknown id.
+- `GET /evaluation/:id` (bearer token) → full result once `done`. Same fields as
+  `/status` plus `report_path` and a parsed `evaluation` object pulled from the
+  report's `## Machine Summary` (`company, role, score, final_decision,
+  legitimacy_tier, risk_level, next_action, top_strengths, hard_stops,
+  soft_gaps`). Before completion it returns the status with `evaluation:null` and
+  a `message`. This is what powers a Telegram reply ("scored 4.2 — here's why").
 - Everything after enqueue (score Blocks A–G, render the tailored CV PDF, merge
   the tracker) is the unchanged batch pipeline.
+
+> [!note] These endpoints ship in `ingest-server.mjs`. The running container must
+> be rebuilt/restarted (`./cops rebuild` or `docker compose restart career-ops`)
+> to pick up the new code.
 
 ## Robust JD fetching (`fetch-jd.mjs`)
 `batch-runner.sh` pre-fetches the JD before the worker runs, so SPA/company pages
@@ -109,6 +124,7 @@ curl -s -o /dev/null -w '%{http_code}\n' -X POST http://career-ops:8765/ingest -
 ```
 
 ## Later (v1.5)
-Wrap `/ingest` as an MCP server (HTTP/SSE) so Hermes calls it as a native tool
-and can pull results back (`get_evaluation`) — that unlocks a Telegram feedback
-reply ("scored 4.2, here's why").
+The plain-HTTP `GET /status/:id` and `GET /evaluation/:id` already deliver the
+Telegram feedback reply ("scored 4.2 — here's why"). The remaining MCP step is to
+wrap `/ingest` + `/evaluation` as an MCP server (HTTP/SSE) so Hermes calls them as
+native tools (`ingest_url`, `get_status`, `get_evaluation`) instead of curl.
