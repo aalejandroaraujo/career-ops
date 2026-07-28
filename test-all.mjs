@@ -3024,6 +3024,50 @@ if (!sqliteAvailable) {
         }
       }
 
+      // 1b. A migrated (10-column) tracker must round-trip too, and export must
+      // mirror whichever schema the SOURCE used. Emitting a UID column for an
+      // un-migrated tracker would be a silent migration; dropping it from a
+      // migrated one would strip the key the web UI and MCP tools address rows by.
+      const uidMd = join(idxTmp, 'uid-applications.md');
+      const uidEnv = { ...process.env, CAREER_OPS_TRACKER: uidMd };
+      const uidRun = (args) => run(NODE, ['tracker.mjs', ...args], { env: uidEnv, stdio: ['pipe', 'pipe', 'pipe'] });
+      const migrated =
+        '# Applications Tracker\n\n' +
+        '| # | Date | Company | Role | Score | Status | PDF | Report | Notes | UID |\n' +
+        '|---|------|---------|------|-------|--------|-----|--------|-------|---|\n' +
+        '| 1 | 2026-01-04 | Acme | Engineer | 4.2/5 | Evaluated | ❌ | [1](../reports/001-acme-2026-01-04.md) | first | ca_01KYMD5T20QWX9J9NGAN5NNF20 |\n';
+      writeFileSync(uidMd, migrated);
+      if (uidRun(['sync']) === null) {
+        fail('tracker sync crashed on a migrated (10-column) fixture');
+      } else {
+        const exported = uidRun(['export']);
+        if (exported === migrated.trim()) {
+          pass('round trip is lossless on a migrated tracker (UID preserved)');
+        } else {
+          fail(`migrated round trip lost data:\n      got:  ${String(exported).split('\n')[2]}\n      want: ${migrated.split('\n')[2]}`);
+        }
+      }
+
+      // A legacy row whose notes contain a stray pipe yields 10 cells too — it
+      // must NOT be mistaken for a uid and promoted into a UID column.
+      const strayMd = join(idxTmp, 'stray-applications.md');
+      const strayEnv = { ...process.env, CAREER_OPS_TRACKER: strayMd };
+      writeFileSync(strayMd,
+        '# Applications Tracker\n\n' +
+        '| # | Date | Company | Role | Score | Status | PDF | Report | Notes |\n' +
+        '|---|------|---------|------|-------|--------|-----|--------|-------|\n' +
+        '| 1 | 2026-01-04 | Acme | Engineer | 4.2/5 | Evaluated | ❌ | [1](../reports/001-acme.md) | a | b |\n');
+      if (run(NODE, ['tracker.mjs', 'sync'], { env: strayEnv, stdio: ['pipe', 'pipe', 'pipe'] }) === null) {
+        fail('tracker sync crashed on a legacy row with a stray pipe');
+      } else {
+        const exported = run(NODE, ['tracker.mjs', 'export'], { env: strayEnv, stdio: ['pipe', 'pipe', 'pipe'] });
+        if (exported && !exported.includes('UID')) {
+          pass('a stray pipe in notes is not promoted to a UID column');
+        } else {
+          fail('a stray pipe in a legacy row was mistaken for a UID column');
+        }
+      }
+
       // 2. Corruption is detected and normalized in the index ONLY.
       const corrupted = clean +
         '| 1 | 2026-01-06 | Gamma | PM | — | 3.5/5 | ❌ | 鈥? | drifted |\n'; // dup id + score in status + mojibake

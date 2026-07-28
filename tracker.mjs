@@ -51,8 +51,13 @@ if (resolve(MD_PATH) === resolve(DB_PATH)) {
   process.exit(1);
 }
 const STATES_PATH = 'templates/states.yml';
-const HEADER = '| # | Date | Company | Role | Score | Status | PDF | Report | Notes | UID |';
-const SEPARATOR = '|---|------|---------|------|-------|--------|-----|--------|-------|---|';
+// Two schemas: pre- and post-UID-migration. Export mirrors whichever schema the
+// source markdown used, so `md → db → md` stays byte-lossless for both. Adding
+// a UID column to an un-migrated tracker on export would be a silent migration.
+const HEADER_LEGACY = '| # | Date | Company | Role | Score | Status | PDF | Report | Notes |';
+const SEPARATOR_LEGACY = '|---|------|---------|------|-------|--------|-----|--------|-------|';
+const HEADER_UID = `${HEADER_LEGACY} UID |`;
+const SEPARATOR_UID = `${SEPARATOR_LEGACY}---|`;
 
 // ── node:sqlite loading ─────────────────────────────────────────────
 
@@ -215,9 +220,22 @@ export function removeRowByNum(content, num) {
 // never modified — normalization lives only in the derived index, and the
 // diagnostics tell the user what to fix at the source (normalize-statuses.mjs,
 // dedup-tracker.mjs).
+// True when the source table declares a UID column. Detected from the header
+// rather than from row contents so an all-empty column is still honoured.
+function sourceHasUidColumn(text) {
+  for (const line of text.split('\n')) {
+    if (!line.trim().startsWith('|')) continue;
+    const cells = line.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map(c => c.trim().toLowerCase());
+    if (cells[0] === '#' || cells.includes('company')) return cells.includes('uid');
+  }
+  return false;
+}
+
 function parseTracker(states) {
   const diag = { mojibake: 0, scoreInStatus: 0, unknownStatus: 0, badId: 0, badDate: 0, strayPipes: 0 };
-  const rows = parseMarkdownRows(readFileSync(MD_PATH, 'utf-8'), diag);
+  const source = readFileSync(MD_PATH, 'utf-8');
+  const hasUid = sourceHasUidColumn(source);
+  const rows = parseMarkdownRows(source, diag);
 
   const usedIds = new Set();
   let maxId = 0;
@@ -264,7 +282,7 @@ function parseTracker(states) {
   }
   for (const app of apps) if (app.id === 0) app.id = ++maxId;
 
-  return { apps, diag };
+  return { apps, diag, hasUid };
 }
 
 function mdHash() {
@@ -291,7 +309,7 @@ function reportDiagnostics(diag) {
 }
 
 function syncIndex(db, states) {
-  const { apps, diag } = parseTracker(states);
+  const { apps, diag, hasUid } = parseTracker(states);
   const today = new Date().toISOString().slice(0, 10);
 
   db.exec('BEGIN');
@@ -313,8 +331,11 @@ function syncIndex(db, states) {
       else if (last.status !== a.status) insertEvent.run(a.id, a.status, today);
     }
 
-    db.prepare('INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value')
-      .run('md_sha256', mdHash());
+    const putMeta = db.prepare('INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value');
+    putMeta.run('md_sha256', mdHash());
+    // Remembered so `export` reproduces the source schema instead of silently
+    // adding a UID column to a tracker that has not been migrated.
+    putMeta.run('has_uid', hasUid ? '1' : '0');
     db.exec('COMMIT');
   } catch (err) {
     db.exec('ROLLBACK');
@@ -367,9 +388,17 @@ function flagValue(args, flag) {
   return kv ? kv.split('=').slice(1).join('=') : null;
 }
 
-function rowToMarkdown(r) {
+// Did the markdown this index was built from declare a UID column? Recorded at
+// sync time so renderers reproduce the source schema rather than guessing from
+// row contents (an all-empty UID column is still a UID column).
+function indexHasUid(db) {
+  return db.prepare('SELECT value FROM meta WHERE key = ?').get('has_uid')?.value === '1';
+}
+
+function rowToMarkdown(r, withUid = false) {
   const clean = (v) => String(v ?? '').replace(/\|/g, '│').replace(/\r?\n/g, ' ');
-  return `| ${r.id} | ${clean(r.date)} | ${clean(r.company)} | ${clean(r.role)} | ${clean(r.score)} | ${clean(r.status)} | ${clean(r.pdf)} | ${clean(r.report)} | ${clean(r.notes)} | ${clean(r.uid)} |`;
+  const base = `| ${r.id} | ${clean(r.date)} | ${clean(r.company)} | ${clean(r.role)} | ${clean(r.score)} | ${clean(r.status)} | ${clean(r.pdf)} | ${clean(r.report)} | ${clean(r.notes)} |`;
+  return withUid ? `${base} ${clean(r.uid)} |` : base;
 }
 
 async function query(args) {
@@ -407,9 +436,10 @@ async function query(args) {
   if (args.includes('--json')) {
     console.log(JSON.stringify(rows, null, 2));
   } else {
-    console.log(HEADER);
-    console.log(SEPARATOR);
-    for (const r of rows) console.log(rowToMarkdown(r));
+    const withUid = indexHasUid(db);
+    console.log(withUid ? HEADER_UID : HEADER_LEGACY);
+    console.log(withUid ? SEPARATOR_UID : SEPARATOR_LEGACY);
+    for (const r of rows) console.log(rowToMarkdown(r, withUid));
     console.error(`\n${rows.length} row(s)`); // stderr so stdout stays pipeable
   }
 }
@@ -439,12 +469,13 @@ async function exportMd(args) {
   const db = openDb(DatabaseSync);
   ensureFresh(db, loadStates());
   const rows = db.prepare('SELECT * FROM applications ORDER BY pos').all();
+  const withUid = indexHasUid(db);
   const out = [
     '# Applications Tracker',
     '',
-    HEADER,
-    SEPARATOR,
-    ...rows.map(rowToMarkdown),
+    withUid ? HEADER_UID : HEADER_LEGACY,
+    withUid ? SEPARATOR_UID : SEPARATOR_LEGACY,
+    ...rows.map(r => rowToMarkdown(r, withUid)),
     '',
   ].join('\n');
 
