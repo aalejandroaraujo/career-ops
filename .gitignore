@@ -49,6 +49,9 @@ LinkedIn Update Pack.md
 config/profile.yml
 portals.yml
 modes/_profile.md
+# Proof points distilled from the user's portfolio — User Layer in
+# DATA_CONTRACT.md and update-system.mjs USER_PATHS, but was never ignored here.
+article-digest.md
 # House rules / custom workflows — User Layer, same as _profile.md
 modes/_custom.md
 .update-dismissed

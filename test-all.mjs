@@ -5304,6 +5304,81 @@ try {
   fail(`weworkremotely provider tests crashed: ${e.message}`);
 }
 
+// ── USER-LAYER GUARDS ───────────────────────────────────────────
+// The User Layer list used to be duplicated in .gitignore, update-system.mjs,
+// and no-user-data.yml, and had drifted in all three — modes/_custom.md,
+// data/follow-ups.md and voice-dna.md were each guarded in some places and not
+// others. user-paths.mjs is now the source of truth; these checks assert the
+// other guards actually agree with it.
+
+console.log('\n34. User-layer guards (privacy)');
+try {
+  const { USER_PATHS, isUserData, findSecrets } = await import(pathToFileURL(join(ROOT, 'user-paths.mjs')).href);
+
+  // Every USER_PATHS entry must actually be ignored by git.
+  const probes = {
+    'cv.md': true, 'article-digest.md': true, 'voice-dna.md': true, 'portals.yml': true,
+    'config/profile.yml': true, 'modes/_profile.md': true, 'modes/_custom.md': true,
+    'data/applications.md': true, 'data/app-events.jsonl': true, 'data/follow-ups.md': true,
+    'reports/001-x.md': true, 'output/cv.pdf': true, 'jds/x.pdf': true,
+    'interview-prep/x.md': true, 'writing-samples/x.md': true, 'assets/headshot.png': true,
+    'LinkedIn Update Pack.md': true,
+    // Must remain committable — the repo needs these tracked.
+    'tracker-store.mjs': false, 'modes/_profile.template.md': false,
+    'voice-dna.template.md': false, 'assets/README.md': false, 'templates/states.yml': false,
+  };
+  let gitignoreOk = true;
+  for (const [path, shouldIgnore] of Object.entries(probes)) {
+    const ignored = run('git', ['check-ignore', '-q', path], { cwd: ROOT, stdio: ['pipe', 'pipe', 'pipe'] }) !== null;
+    if (ignored !== shouldIgnore) {
+      fail(`.gitignore: ${path} ${shouldIgnore ? 'should be ignored but is NOT' : 'is ignored but should be committable'}`);
+      gitignoreOk = false;
+    }
+  }
+  if (gitignoreOk) pass(`.gitignore covers all ${Object.keys(probes).length} probe paths correctly`);
+
+  // isUserData must agree with the intent above.
+  const misclassified = Object.entries(probes).filter(([p, want]) => isUserData(p) !== want);
+  if (misclassified.length === 0) pass('isUserData() classification matches .gitignore');
+  else fail(`isUserData() disagrees with .gitignore for: ${misclassified.map(([p]) => p).join(', ')}`);
+
+  // Scaffolding under a user-layer directory must stay committable.
+  if (!isUserData('data/.gitkeep') && !isUserData('writing-samples/README.md') && !isUserData('config/profile.example.yml')) {
+    pass('scaffolding (.gitkeep, README.md, *.example.*) is exempt');
+  } else {
+    fail('scaffolding was misclassified as user data — it must stay committable');
+  }
+
+  // Secret detection: real shapes caught, prose left alone.
+  const caught = findSecrets('const k = "sk-ant-api03-' + 'A'.repeat(30) + '";').length > 0
+    && findSecrets('token: ghp_' + 'b'.repeat(36)).length > 0
+    && findSecrets('key = "AIza' + 'C'.repeat(35) + '"').length > 0;
+  if (caught) pass('findSecrets() catches Anthropic, GitHub and Google key shapes');
+  else fail('findSecrets() missed a known credential shape');
+
+  if (findSecrets('This paragraph mentions sk-ant and ghp_ but carries no key.').length === 0) {
+    pass('findSecrets() does not fire on prose');
+  } else {
+    fail('findSecrets() false-positives on prose');
+  }
+
+  // The pre-commit hook must be present and executable, or the whole
+  // prevention layer is silently absent on a fresh clone.
+  const hook = join(ROOT, '.githooks', 'pre-commit');
+  if (existsSync(hook) && existsSync(`${hook}.mjs`)) {
+    const mode = statSync(hook).mode & 0o111;
+    if (mode) pass('.githooks/pre-commit exists and is executable');
+    else fail('.githooks/pre-commit is not executable — the hook will not run');
+  } else {
+    fail('.githooks/pre-commit(.mjs) missing — no commit-time privacy guard');
+  }
+
+  if (USER_PATHS.length >= 15) pass(`user-paths.mjs declares ${USER_PATHS.length} user-layer patterns`);
+  else fail(`user-paths.mjs only declares ${USER_PATHS.length} patterns — entries may have been dropped`);
+} catch (e) {
+  fail(`user-layer guard tests crashed: ${e.message}`);
+}
+
 // ── FOCUSED SUITES ──────────────────────────────────────────────
 // Feature-specific suites live in their own files so they can be run alone
 // while iterating. They are executed here because CI runs ONLY this file

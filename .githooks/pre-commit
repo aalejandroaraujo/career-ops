@@ -1,0 +1,4 @@
+#!/bin/sh
+# Shim: the real hook is ESM, and Node only treats a file as a module when it
+# ends in .mjs (this package has no "type": "module").
+exec node "$(dirname "$0")/pre-commit.mjs" "$@"
