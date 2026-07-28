@@ -7,6 +7,10 @@ data/scan-history.tsv
 data/parser-output/**/*.json
 !data/parser-output/.gitkeep
 !data/parser-output/**/.gitkeep
+# Follow-up history (User Layer per DATA_CONTRACT.md, was missing here)
+data/follow-ups.md
+# Per-application note + status-change ledger (User Layer)
+data/app-events.jsonl
 data/cache/ats-companies/
 reports/*.md
 !reports/.gitkeep
@@ -33,6 +37,8 @@ writing-samples/*
 config/profile.yml
 portals.yml
 modes/_profile.md
+# House rules / custom workflows — User Layer, same as _profile.md
+modes/_custom.md
 .update-dismissed
 .update-lock
 
