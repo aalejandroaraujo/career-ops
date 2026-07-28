@@ -33,6 +33,18 @@ interview-prep/*
 writing-samples/*
 !writing-samples/README.md
 
+# Voice calibration. Declared User Layer in DATA_CONTRACT.md and listed in
+# update-system.mjs USER_PATHS ("NEVER touch these"), but it shipped tracked —
+# so personalising it would publish the user's writing profile. Same bug
+# upstream fixed for interview-prep/story-bank.md in #944. The pristine
+# template stays as voice-dna.template.md.
+voice-dna.md
+
+# Personal media and career collateral (photos, LinkedIn packs, portfolio bits)
+assets/*
+!assets/README.md
+LinkedIn Update Pack.md
+
 # User config and customization (never auto-updated)
 config/profile.yml
 portals.yml
