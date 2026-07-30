@@ -1,0 +1,181 @@
+%-------------------------
+% Career-Ops LaTeX CV Template — AltaCV variant (two-column, with photo)
+% Based on: AltaCV v1.7.4 by LianTze Lim (liantze@gmail.com)
+% License: LaTeX Project Public License (LPPL) 1.3+
+% Requires: altacv.cls (shipped alongside this file in templates/)
+%
+% This is a placeholder template. The AI agent fills every double-brace token
+% from cv.md / config/profile.yml at generation time, writes the filled .tex,
+% then validates + compiles it with generate-latex.mjs.
+%
+% Compile: XeLaTeX (preferred) or pdfLaTeX. generate-latex.mjs auto-selects.
+% The academic bibliography (biber) has been intentionally removed — a job CV
+% doesn't need it, and it keeps the toolchain to a single engine.
+%------------------------
+
+\documentclass[10pt,a4paper,withhyper]{altacv}
+
+% Page layout
+\geometry{left=1cm,right=1cm,top=1.5cm,bottom=1.5cm,columnsep=1cm}
+
+% paracol drives the two-column body
+\usepackage{paracol}
+
+% Font. Under XeLaTeX/LuaLaTeX use the system Lato; under pdfLaTeX use the
+% bundled lato package (Type1, no system font needed). generate-latex.mjs
+% ensures the right one is available for whichever engine it picks.
+\iftutex
+  \setmainfont{Lato}
+\else
+  \usepackage[default]{lato}
+\fi
+
+% Body leading. The experience column is packed to the 2-page limit, so a global
+% leading bump spills a 3rd page — kept neutral. (Breathing room is added in the
+% shorter right column instead; see \cvcert spacing below.)
+\linespread{1.0}
+
+% Colours — accent drives headings/marks. Tweak to taste.
+\definecolor{Blue}{HTML}{0080ff}
+\definecolor{SlateGrey}{HTML}{2E2E2E}
+\definecolor{LightGrey}{HTML}{666666}
+\definecolor{Black}{HTML}{000000}
+\colorlet{heading}{Black}
+\colorlet{headingrule}{Black}
+\colorlet{accent}{Blue}
+\colorlet{emphasis}{SlateGrey}
+\colorlet{body}{LightGrey}
+
+% Markers
+\renewcommand{\cvItemMarker}{{\small\textbullet}}
+\renewcommand{\cvRatingMarker}{\faCircle}
+
+% Compact one-line certification entry with a small marker — lets many certs fit
+% without the tall two-row \cvachievement layout (whose icon is \LARGE).
+\newcommand{\cvcert}[1]{%
+  {\footnotesize\color{accent}\faCertificate}\hspace{0.6em}{\small #1}\par\medskip%
+}
+
+% Language/skill rating: circles PLUS the numeric level after them, so the level
+% is unambiguous at a glance without counting dots. Whole row is \small and the
+% circles \footnotesize so a long label (e.g. "German (B1, B2 in progress)")
+% still fits on ONE line in the narrow right column.
+\newcommand{\cvskillnum}[2]{%
+  {\small\textcolor{emphasis}{\textbf{#1}}}\hfill
+  {\footnotesize
+  \foreach \lvl in {1,...,5}{%
+    \ifdimgreater{\lvl bp}{#2 bp}{\color{body!30}}{\color{accent}}\cvRatingMarker%
+  }}\hspace{0.4em}{\small\bfseries\color{accent}#2}\par%
+}
+
+% Mirror the photo horizontally (subject faces into the text) while KEEPING the
+% circular crop, AND leaving a little headroom above the head. Instead of the
+% centered overzoom fill (which crops right into the top of the head), we clip a
+% circle and drop the image inside it, shifted DOWN by \photoheadroom — so the
+% top of the circle shows a gap above the head. \reflectbox mirrors horizontally;
+% vertical framing is unaffected. width=1.04\linewidth guarantees the circle stays
+% fully covered after the shift (portrait source, so height already overflows).
+\newlength{\photoheadroom}
+\setlength{\photoheadroom}{0.34cm}% ~7.5% of the 4.4cm circle: gap above the head
+\makeatletter
+\renewcommand{\@makeaphoto}[2]{%
+  \begin{minipage}{#1}%
+    \if@normalphoto
+      \reflectbox{\includegraphics[width=\linewidth]{#2}}%
+    \else
+      \reflectbox{%
+        \begin{tikzpicture}
+          \clip (0,0) circle (0.5\linewidth);
+          \node[inner sep=0pt] at (0,-\photoheadroom)
+            {\includegraphics[width=1.04\linewidth]{#2}};
+        \end{tikzpicture}%
+      }%
+    \fi%
+  \end{minipage}%
+}
+% Nudge the right-hand photo inward from the page edge (moves it toward the left).
+\renewcommand{\altacv@add@photo@right}[1]{%
+  \appto{\altacv@right@photos}{\@makeaphoto{\altacv@photo@diam@right}{#1}\hspace{1.2cm}}%
+  \addtolength{\altacv@photos@width}{\altacv@photo@diam@right}%
+  \addtolength{\altacv@photos@width}{1.2cm}%
+}
+% Bigger personal-details text (was \footnotesize) so the contact block has more body.
+\renewcommand{\personalinfofont}{\small\bfseries}
+% Header override: distribute name / tagline / personal-info EVENLY across the full
+% photo height (via a \vbox to the photo diameter with \vfill between the blocks),
+% so the contact details spread down to fill the blank gap above the Summary instead
+% of clustering under the tagline. Header height stays bounded by the photo, so this
+% does not push the body down / add a page.
+\renewcommand{\makecvheader}{%
+  \begingroup
+    \altacv@left@photos\hfill%
+    \begin{minipage}[c]{\dimexpr\linewidth-\altacv@photos@width}%
+      \raggedright
+      \vbox to \altacv@photo@diam@right{%
+        \raggedright
+        {\namefont\color{name}\MakeUppercase{\@name}\par}%
+        \vfill
+        {\taglinefont\color{tagline}\@tagline\par}%
+        \vfill
+        {\personalinfofont\@personalinfo\par}%
+        \vfill
+      }%
+    \end{minipage}\hfill%
+    \altacv@right@photos\par%
+  \endgroup\medskip
+}
+\makeatother
+
+\begin{document}
+\name{{{NAME}}}
+\tagline{{{TAGLINE}}}
+% Photo — the build fills this with a \photoR{...}{<basename>} block, or leaves it
+% empty. Image file lives next to the .tex at compile time (no extension in arg);
+% \@makeaphoto is overridden above to mirror it horizontally.
+{{PHOTO_BLOCK}}
+\personalinfo{%
+{{PERSONAL_INFO}}
+}
+
+\makecvheader
+
+\cvsection{About Me}
+{{SUMMARY}}
+
+%% Bullet font. Held at \small: the experience column is at the 2-page limit and
+%% any larger size/leading spills to a 3rd page (would need trimming bullets).
+\AtBeginEnvironment{itemize}{\small}
+
+%% Left/right column width ratio 6:4
+\columnratio{0.6}
+
+\begin{paracol}{2}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%  LEFT COLUMN  %%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\cvsection{Experience}
+{{EXPERIENCE}}
+
+{{PREVIOUS_EXPERIENCE}}
+
+%% Switch to the right column
+\switchcolumn
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%  RIGHT COLUMN  %%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\cvsection{Key Achievements}
+{{KEY_ACHIEVEMENTS}}
+
+\cvsection{Skills}
+{{SKILLS}}
+
+\cvsection{Education}
+{{EDUCATION}}
+
+\cvsection{Certifications}
+{{CERTIFICATIONS}}
+
+\cvsection{Languages}
+{{LANGUAGES}}
+
+\end{paracol}
+
+\end{document}

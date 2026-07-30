@@ -72,8 +72,14 @@ bun.lock
 # Report-number reservation sentinels (ephemeral, created by reserve-report-num.mjs)
 reports/*-RESERVED.md
 
-# Backup files written by normalize-statuses.mjs / dedup-tracker.mjs
+# Backup files written by normalize-statuses.mjs / dedup-tracker.mjs / batch-runner.sh
+# (the timestamped variants — *.bak-20260729-124417, *.bak-131713 — miss a bare *.bak)
 *.bak
+*.bak-*
+
+# Third-party CV template packs downloaded for reference (altacv.cls is vendored
+# deliberately; the zips are not)
+templates/*.zip
 
 # OS
 .DS_Store
