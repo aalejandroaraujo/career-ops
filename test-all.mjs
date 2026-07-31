@@ -3839,6 +3839,109 @@ try {
   fail(`LaTeX validator i18n test crashed: ${e.message}`);
 }
 
+// ── 20b. LATEX VALIDATOR TEMPLATE AWARENESS ─────────────────────
+
+console.log('\n20b. LaTeX validator template awareness (classic vs altacv)');
+
+// The two templates share no macros. Validating an AltaCV .tex against the
+// classic template's rules (\resumeSubheading, \section{}, \pdfgentounicode)
+// used to fail every AltaCV CV with 5 bogus issues and never compile it.
+// Sections are deliberately short of 4 so validation exits before the compile
+// step — these assert on the rules picked, not on a LaTeX run.
+const altacvTex = (sections) => `\\documentclass[10pt,a4paper,withhyper]{altacv}
+\\begin{document}
+\\name{Test Candidate}
+\\makecvheader
+${sections.map((s) => `\\cvsection{${s}}`).join('\n')}
+\\cvevent{Engineer}{ACME}{2020 -- Present}{Zurich}
+\\end{document}
+`;
+
+try {
+  const altacv = latexValidate(altacvTex(['About Me', 'Experience', 'Skills']));
+
+  if (altacv && altacv.template === 'altacv') {
+    pass('altacv \\documentclass is detected as the altacv template');
+  } else {
+    fail(`altacv template not detected: ${JSON.stringify(altacv && altacv.template)}`);
+  }
+
+  // The core regression: classic-only macros must not be demanded of AltaCV.
+  const classicOnly = /resumeSubheading|resumeItem|resumeProjectHeading|pdfgentounicode/;
+  if (altacv && !altacv.issues.some((i) => classicOnly.test(i))) {
+    pass('altacv CV is not flagged for missing classic macros');
+  } else {
+    fail(`altacv CV flagged with classic-template issues: ${JSON.stringify(altacv && altacv.issues)}`);
+  }
+
+  // Section counting must follow the template's own section macro.
+  if (altacv && altacv.issues.some((i) => /at least 4 \\cvsection/.test(i))) {
+    pass('altacv section shortfall is reported against \\cvsection{}');
+  } else {
+    fail(`altacv section count not measured via \\cvsection: ${JSON.stringify(altacv && altacv.issues)}`);
+  }
+
+  const fullAltacv = latexValidate(altacvTex(['About Me', 'Experience', 'Skills', 'Education']));
+  if (fullAltacv && fullAltacv.issues.length === 0) {
+    pass('a structurally complete altacv CV validates clean');
+  } else {
+    fail(`complete altacv CV still has issues: ${JSON.stringify(fullAltacv && fullAltacv.issues)}`);
+  }
+
+  // A missing structural macro must still be caught — per template.
+  const noHeader = latexValidate(`\\documentclass{altacv}
+\\begin{document}
+\\cvsection{About Me}
+\\cvsection{Experience}
+\\cvsection{Skills}
+\\cvsection{Education}
+\\end{document}
+`);
+  if (noHeader && noHeader.issues.some((i) => /makecvheader/.test(i))
+    && noHeader.issues.some((i) => /cvevent/.test(i))) {
+    pass('altacv CV missing \\makecvheader / \\cvevent is flagged');
+  } else {
+    fail(`altacv structural macros not enforced: ${JSON.stringify(noHeader && noHeader.issues)}`);
+  }
+
+  // The classic template must keep its own rules (no silent relaxation).
+  const classic = latexValidate(baseTex('Education'));
+  if (classic && classic.template === 'classic') {
+    pass('classic \\documentclass{article} still resolves to the classic template');
+  } else {
+    fail(`classic template not detected: ${JSON.stringify(classic && classic.template)}`);
+  }
+
+  const classicMissing = latexValidate(`\\documentclass{article}
+\\begin{document}
+\\section{Education}
+\\section{Experience}
+\\section{Projects}
+\\section{Skills}
+\\end{document}
+`);
+  if (classicMissing && classicMissing.issues.some((i) => /resumeSubheading/.test(i))
+    && classicMissing.issues.some((i) => /pdfgentounicode/.test(i))) {
+    pass('classic CV still requires its own macros and \\pdfgentounicode');
+  } else {
+    fail(`classic rules were relaxed: ${JSON.stringify(classicMissing && classicMissing.issues)}`);
+  }
+
+  // An unknown class falls back to classic rather than crashing.
+  const unknown = latexValidate(`\\documentclass{moderncv}
+\\begin{document}
+\\section{Education}
+\\end{document}
+`);
+  if (unknown && unknown.template === 'classic') {
+    pass('unknown \\documentclass falls back to the classic profile');
+  } else {
+    fail(`unknown documentclass did not fall back to classic: ${JSON.stringify(unknown && unknown.template)}`);
+  }
+} catch (e) {
+  fail(`LaTeX validator template-awareness test crashed: ${e.message}`);
+}
+
 // ── 21. CJK CV RENDERING (lang="ja" font fallback) ──────────────
 
 console.log('\n21. CJK CV rendering (lang="ja" font fallback)');

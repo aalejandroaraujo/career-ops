@@ -8,7 +8,10 @@
 % from cv.md / config/profile.yml at generation time, writes the filled .tex,
 % then validates + compiles it with generate-latex.mjs.
 %
-% Compile: XeLaTeX (preferred) or pdfLaTeX. generate-latex.mjs auto-selects.
+% Compile: pdfLaTeX (what generate-latex.mjs picks for this template — the
+% \else branch below uses the bundled Type1 lato package, so it needs no system
+% font) or XeLaTeX/LuaLaTeX, which take the \iftutex branch and require Lato
+% installed as a system font.
 % The academic bibliography (biber) has been intentionally removed — a job CV
 % doesn't need it, and it keeps the toolchain to a single engine.
 %------------------------
