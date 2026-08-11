@@ -16,7 +16,13 @@ ENV DEBIAN_FRONTEND=noninteractive \
 ARG GO_VERSION=1.23.4
 RUN set -eux; \
     apt-get update; \
-    apt-get install -y --no-install-recommends ca-certificates curl git tini latexmk texlive-latex-recommended texlive-latex-extra texlive-fonts-recommended texlive-xetex; \
+    # texlive-fonts-extra is required by the AltaCV CV path: altacv.cls hard-requires
+    # fontawesome5 (\RequirePackage[fixed]{fontawesome5}), cv-altacv.tex uses lato, and
+    # academicons is pulled in for the icon set. None ship in *-recommended or
+    # latex-extra, so without this the AltaCV compile dies with
+    # "! LaTeX Error: File `fontawesome5.sty' not found." and produces no PDF at all.
+    # It is a large package (~1.2 GB installed) — that cost buys the LaTeX CV pipeline.
+    apt-get install -y --no-install-recommends ca-certificates curl git tini latexmk texlive-latex-recommended texlive-latex-extra texlive-fonts-recommended texlive-fonts-extra texlive-xetex; \
     arch="$(dpkg --print-architecture)"; \
     case "$arch" in \
       amd64)  go_arch=amd64 ;; \
