@@ -5,8 +5,10 @@
  *
  * Tests whether job posting URLs are still active or have expired.
  * Uses the same detection logic as scan.md step 7.5.
- * Zero Claude API tokens. Two rungs: a free ATS API check first
- * (Greenhouse/Lever — no browser), then Playwright for everything else.
+ * Zero Claude API tokens. Two rungs: a free ATS check first (Greenhouse/Lever via
+ * their per-job JSON API; Phenom People career sites via the `phApp.ddo` payload
+ * embedded in the posting page — no browser either way), then Playwright for
+ * everything else.
  *
  * Usage:
  *   node check-liveness.mjs <url1> [url2] ...
@@ -77,7 +79,8 @@ async function main() {
     const url = urls[i];
     let result, reason, usedBrowser = false;
 
-    // Rung 1: zero-token ATS API check. A conclusive active/expired wins; otherwise fall through.
+    // Rung 1: zero-token ATS check (Greenhouse/Lever JSON API, Phenom embedded DDO).
+    // A conclusive active/expired wins; otherwise fall through.
     const api = await checkLivenessViaApi(url);
     if (api) {
       ({ result, reason } = api);

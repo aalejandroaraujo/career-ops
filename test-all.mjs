@@ -295,6 +295,71 @@ try {
     fail('resolveAtsApi guard failed (bad id or http accepted)');
   }
 
+  // Phenom People rung. Phenom career sites (careers.sunrise.ch, jobs.gsk.com)
+  // render Apply/Save from a Vue bundle, so the DOM sweep sees no apply control
+  // and every LIVE posting used to come back `uncertain` — which downstream
+  // workers read as "closed". The fix reads Phenom's own `phApp.ddo` payload.
+  // These cover the pure parse + classify halves; the network half is
+  // conservative by construction (unknown status → null → Playwright).
+  const { extractPhenomDdo, classifyPhenomJobDetail, isPhenomHtml } =
+    await import(pathToFileURL(join(ROOT, 'liveness-core.mjs')).href);
+  const { isPhenomCandidateUrl } = await import(pathToFileURL(join(ROOT, 'liveness-api.mjs')).href);
+
+  const phenomHtml = '<html><head><script>var phApp = phApp || {"widgetApiEndpoint":"https://careers.example.ch/widgets"};'
+    + 'phApp.ddo = {"jobDetail":{"status":200,"hits":1,"totalHits":1,"data":{"job":'
+    + '{"jobId":"REQ_1","title":"Agentic AI Engineer 80-100%","jobStatus":"OPEN",'
+    + '"description":"&lt;p&gt;a }{ \\" brace-and-quote trap&lt;/p&gt;"}}}};'
+    + 'phApp.experimentData = {};</script></head><body>APPLY NOW</body></html>';
+  const liveDdo = extractPhenomDdo(phenomHtml);
+  if (liveDdo?.jobDetail?.data?.job?.jobStatus === 'OPEN') {
+    pass('extractPhenomDdo parses phApp.ddo past braces/quotes inside strings');
+  } else {
+    fail(`extractPhenomDdo failed to parse the embedded DDO: ${JSON.stringify(liveDdo)?.slice(0, 120)}`);
+  }
+  const liveVerdict = classifyPhenomJobDetail(liveDdo);
+  if (liveVerdict?.result === 'active' && liveVerdict.code === 'phenom_job_open') {
+    pass('Phenom jobStatus OPEN resolves a live posting to active (not uncertain)');
+  } else {
+    fail(`Phenom OPEN posting misclassified: ${JSON.stringify(liveVerdict)}`);
+  }
+  const goneVerdict = classifyPhenomJobDetail({ jobDetail: { hits: 0, totalHits: 0, data: {} } });
+  if (goneVerdict?.result === 'expired' && goneVerdict.code === 'phenom_job_gone') {
+    pass('Phenom 0-hit job detail resolves to expired');
+  } else {
+    fail(`Phenom 0-hit detail misclassified: ${JSON.stringify(goneVerdict)}`);
+  }
+  const closedVerdict = classifyPhenomJobDetail({
+    jobDetail: { hits: 1, data: { job: { postingStatus: 'CLOSED', title: 'Role' } } },
+  });
+  if (closedVerdict?.result === 'expired' && closedVerdict.code === 'phenom_job_closed') {
+    pass('Phenom postingStatus CLOSED resolves to expired');
+  } else {
+    fail(`Phenom CLOSED posting misclassified: ${JSON.stringify(closedVerdict)}`);
+  }
+  const unknownStatus = classifyPhenomJobDetail({
+    jobDetail: { hits: 1, data: { job: { jobStatus: 'SOMETHING_NEW', title: 'Role' } } },
+  });
+  const notPhenom = classifyPhenomJobDetail(extractPhenomDdo('<html><body>hello</body></html>'));
+  if (unknownStatus === null && notPhenom === null) {
+    pass('Unknown Phenom status / non-Phenom HTML yield null (never a guessed expired)');
+  } else {
+    fail(`Phenom classifier guessed on unknown input: ${JSON.stringify({ unknownStatus, notPhenom })}`);
+  }
+  if (isPhenomHtml(phenomHtml) && !isPhenomHtml('<html><body>plain</body></html>')) {
+    pass('isPhenomHtml identifies Phenom-hosted pages only');
+  } else {
+    fail('isPhenomHtml misidentified a page');
+  }
+  if (isPhenomCandidateUrl('https://careers.sunrise.ch/gb/en/job/SCASCAGBREQ30036631EXTERNALENGB/Agentic-AI-Engineer')
+      && isPhenomCandidateUrl('https://jobs.gsk.com/gb/en/job/GHVGPAGB435520EXTERNALENGB/slug')
+      && !isPhenomCandidateUrl('https://www.pracuj.pl/praca/sap-consultant,oferta,1004870954')
+      && !isPhenomCandidateUrl('https://boards.greenhouse.io/acme/jobs/4567890')
+      && !isPhenomCandidateUrl('http://careers.sunrise.ch/gb/en/job/ABC/slug')) {
+    pass('isPhenomCandidateUrl gates the probe to /job/<id>/ URLs over https');
+  } else {
+    fail('isPhenomCandidateUrl gate is wrong (would probe or skip the wrong URLs)');
+  }
+
   // Headed-fallback-on-challenge path (liveness-browser.mjs). Fake Playwright
   // pages script the goto/evaluate calls so we can exercise the wrapper without
   // launching a browser. checkUrlLiveness reads body text first, apply controls

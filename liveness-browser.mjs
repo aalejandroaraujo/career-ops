@@ -5,7 +5,7 @@
  * Returns the same shape as classifyLiveness: { result, reason }.
  */
 
-import { classifyLiveness } from './liveness-core.mjs';
+import { classifyLiveness, classifyPhenomJobDetail } from './liveness-core.mjs';
 
 const NAVIGATE_TIMEOUT_MS = 15_000;
 const HYDRATION_WAIT_MS = 2_000;
@@ -173,7 +173,45 @@ export async function checkUrlLiveness(page, url, { extraSettleMs = 0 } = {}) {
         .filter(Boolean);
     });
 
-    return classifyLiveness({ status, finalUrl, bodyText, applyControls });
+    const classified = classifyLiveness({ status, finalUrl, bodyText, applyControls });
+
+    // Phenom People sites (careers.sunrise.ch, jobs.gsk.com, ...) render their
+    // Apply/Save controls from a Vue bundle that the DOM sweep above can't see, so
+    // a live posting lands on `no_apply_control` → uncertain. The page itself
+    // carries the server's answer on `window.phApp.ddo`, so read it for free (no
+    // extra request) and prefer that first-party verdict. HTTP 404/410 still wins:
+    // a gone URL is gone regardless of any stale payload left in the document.
+    if (classified.code !== 'http_gone') {
+      const phenomDetail = await page
+        .evaluate(() => {
+          const detail = globalThis.phApp?.ddo?.jobDetail;
+          if (!detail) return null;
+          try {
+            // Structured-clone the whole DDO would be huge; ship only what the
+            // classifier reads.
+            return JSON.parse(
+              JSON.stringify({
+                hits: detail.hits,
+                totalHits: detail.totalHits,
+                data: {
+                  job: {
+                    jobStatus: detail.data?.job?.jobStatus,
+                    postingStatus: detail.data?.job?.postingStatus,
+                    title: detail.data?.job?.title,
+                  },
+                },
+              })
+            );
+          } catch {
+            return null;
+          }
+        })
+        .catch(() => null);
+      const phenomVerdict = classifyPhenomJobDetail(phenomDetail);
+      if (phenomVerdict) return phenomVerdict;
+    }
+
+    return classified;
   } catch (err) {
     // Transient failures (timeout, DNS, TLS, 5xx) shouldn't be treated as expired —
     // doing so would cause scan --verify to drop the URL and write it to scan-history,
