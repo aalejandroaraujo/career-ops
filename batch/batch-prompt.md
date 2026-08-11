@@ -246,7 +246,7 @@ Where `{company-slug}` is the company name in lowercase, without spaces, with hy
 **Score:** {X/5}
 **Legitimacy:** {High Confidence | Proceed with Caution | Suspicious}
 **URL:** {URL of the original offer}
-**PDF:** {output/cv-candidate-{company-slug}-{{DATE}}.pdf if score ≥ the resolved `auto_pdf_score_threshold` from Paso 4, else `not generated — run /career-ops pdf {company-slug} to create on demand`}
+**PDF:** {output/cv-{candidate}-{company-slug}-{{DATE}}.pdf if score ≥ the resolved `auto_pdf_score_threshold` from Paso 4, else `not generated — run /career-ops pdf {company-slug} to create on demand`}
 **Batch ID:** {{ID}}
 
 ---
@@ -353,7 +353,7 @@ next_action: "{one concrete next step}"
 7. Reorder experience bullets by relevance to the JD
 8. Build `skill_tags` (6-8 keyword phrases, grouped into rows)
 9. Inject keywords into existing achievements (**NEVER invent**)
-10. Write the JSON payload to `/tmp/cv-candidate-{company-slug}.json` using **this**
+10. Write the JSON payload to `/tmp/cv-{candidate}-{company-slug}.json` using **this**
     schema (it is the AltaCV one — NOT the schema in `modes/latex.md`, which
     documents the classic single-column template):
 
@@ -384,15 +384,21 @@ next_action: "{one concrete next step}"
   - **Do not escape LaTeX**: `build-cv-altacv.mjs` escapes everything. Pass plain text.
   - The photo resolves itself from `assets/headshot.png` — do not put it in the payload.
 
+**`{candidate}`** = `config/profile.yml` → `candidate.full_name`, lowercased, accents
+    folded to ASCII, every run of non-alphanumerics collapsed to a single `-`
+    (`Alejandro Araujo Rajzner` → `alejandro-araujo-rajzner`). Do NOT write the
+    literal string `candidate` — the filename must be predictable so other tooling
+    can find the CV without guessing.
+
 11. Run both steps (the second one validates AND compiles):
 ```bash
 node build-cv-altacv.mjs \
-  /tmp/cv-candidate-{company-slug}.json \
-  output/cv-candidate-{company-slug}-{{DATE}}.tex
+  /tmp/cv-{candidate}-{company-slug}.json \
+  output/cv-{candidate}-{company-slug}-{{DATE}}.tex
 
 node generate-latex.mjs \
-  output/cv-candidate-{company-slug}-{{DATE}}.tex \
-  output/cv-candidate-{company-slug}-{{DATE}}.pdf
+  output/cv-{candidate}-{company-slug}-{{DATE}}.tex \
+  output/cv-{candidate}-{company-slug}-{{DATE}}.pdf
 ```
 
 12. **Verify the PDF exists before reporting success.** `generate-latex.mjs` returns
