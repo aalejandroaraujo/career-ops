@@ -128,11 +128,11 @@ After detecting archetype, read `modes/_profile.md` for the user's specific fram
 | WebSearch | Comp research, trends, company culture, LinkedIn contacts, fallback for JDs |
 | WebFetch | Fallback for extracting JDs from static pages |
 | Playwright | Verify offers (browser_navigate + browser_snapshot). **NEVER 2+ agents with Playwright in parallel.** |
-| Read | cv.md, _profile.md, article-digest.md, cv-template.html |
-| Write | Temporary HTML for PDF, applications.md, reports .md |
+| Read | cv.md, _profile.md, article-digest.md, cv-altacv.tex |
+| Write | Temporary CV payload JSON, output/*.tex, applications.md, reports .md |
 | Edit | Update tracker |
 | Canva MCP | Optional visual CV generation. Duplicate base design, edit text, export PDF. Requires `cv.canva_resume_design_id` in profile.yml. |
-| Bash | `node generate-pdf.mjs` |
+| Bash | `node build-cv-altacv.mjs` then `node generate-latex.mjs` (AltaCV is the default CV format — see `modes/pdf.md`; `generate-pdf.mjs` is the opt-in `--html` fallback only) |
 
 ### Time-to-offer priority
 - Working demo + metrics > perfection
@@ -250,7 +250,7 @@ _If `voice-dna.md` exists, its §3 Banned List is the canonical, fuller version 
 - "demonstrated ability to" / "best practices" (name the practice)
 
 ### Unicode normalization for ATS
-`generate-pdf.mjs` automatically normalizes em-dashes, smart quotes, and zero-width characters to ASCII equivalents for maximum ATS compatibility. But avoid generating them in the first place.
+`generate-pdf.mjs` (the `--html` fallback) normalizes em-dashes, smart quotes and zero-width characters to ASCII for ATS compatibility. On the default AltaCV path `build-cv-altacv.mjs` escapes for LaTeX instead. Either way, avoid generating them in the first place.
 
 ### Vary sentence structure
 - Don't start every bullet with the same verb

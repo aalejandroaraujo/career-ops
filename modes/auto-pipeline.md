@@ -39,10 +39,14 @@ Include Block G in the saved report. Add **URL:** {url} and **Legitimacy:** {tie
 
 ## Step 3 — Generate PDF
 
-Read `config/profile.yml`. Check `cv.output_format`:
+Execute the full pipeline from `modes/pdf.md`. It produces the **AltaCV** format
+(`build-cv-altacv.mjs` → `generate-latex.mjs`) — the same document the batch worker
+generates, written to `output/cv-{candidate}-{company-slug}-{YYYY-MM-DD}.pdf`.
 
-- If `"latex"`, execute the full pipeline from `modes/latex.md`
-- Otherwise (default), execute the full pipeline from `modes/pdf.md`
+`cv.output_format` in `config/profile.yml` is legacy and **no longer routes the
+format**: both of its historical values (`"html"`, `"latex"`) resolve to AltaCV, so a
+stale value cannot silently produce the wrong document. The HTML and classic
+single-column fallbacks are opt-in only — see `modes/pdf.md` → "Format selection".
 
 ## Step 4 — Draft Application Answers (only if score >= 4.5)
 
