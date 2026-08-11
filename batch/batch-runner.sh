@@ -568,6 +568,24 @@ process_offer() {
       fi
     fi
 
+    # A worker can exit 0 and emit a plausible "score" without having written
+    # anything — e.g. it notices the same URL was already evaluated and just
+    # echoes the previous result. That produced id 29 on 2026-08-11: "completed"
+    # in 68s, report_num 040, score 4.6, but no reports/040-*.md and no tracker
+    # TSV. Trusting the worker's word makes a no-op indistinguishable from a real
+    # evaluation, so require the artifact to exist on disk.
+    local report_glob_found=""
+    if [[ -n "$report_num" && "$report_num" != "-" ]]; then
+      for candidate_report in "$REPORTS_DIR/$report_num"-*.md; do
+        [[ -f "$candidate_report" ]] && { report_glob_found="$candidate_report"; break; }
+      done
+    fi
+    if [[ -z "$report_glob_found" ]]; then
+      update_state "$id" "$url" "failed" "$started_at" "$completed_at" "$report_num" "$score" "worker exited 0 but wrote no report ${report_num}-*.md" "$retries"
+      echo "    ❌ Failed: worker reported success (score: $score, report: $report_num) but no report file was written"
+      return 0
+    fi
+
     update_state "$id" "$url" "completed" "$started_at" "$completed_at" "$report_num" "$score" "-" "$retries"
     echo "    ✅ Completed (score: $score, report: $report_num)"
   elif [[ "$terminal_failure_recorded" == "false" ]]; then
