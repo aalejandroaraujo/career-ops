@@ -1,0 +1,25 @@
+# Local overrides — NOT part of the upstream repo.
+#
+# docker-compose.yml is on update-system.mjs's SYSTEM_FILES list, so anything
+# added there is lost on `node update-system.mjs apply`. This file is merged by
+# `docker compose` automatically and is never touched by the updater.
+
+services:
+  # Pin the MCP container to a fixed address on careerops-bridge.
+  #
+  # Why: the host publishes this container on 127.0.0.1:8766, and with ufw's
+  # default-deny-outgoing policy the loopback connection is DNAT'd to the
+  # container's bridge IP *before* it hits the OUTPUT chain — so the host needs
+  # an `allow out` rule naming that IP. Dynamic allocation reshuffles .2/.3/.4
+  # on every recreate, which silently breaks that rule (host-side Hermes then
+  # hangs on http://127.0.0.1:8766/mcp). A fixed IP makes the ufw rule stable:
+  #
+  #   sudo ufw allow out to 172.21.0.50 port 8766 proto tcp \
+  #     comment 'career-ops MCP: host->container for Hermes GW loopback'
+  #
+  # .50 sits well above the dynamic range (which fills from .2 upward), so it
+  # can't be claimed by another container before this one starts.
+  career-ops-mcp:
+    networks:
+      careerops-bridge:
+        ipv4_address: 172.21.0.50
