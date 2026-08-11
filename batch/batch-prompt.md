@@ -20,8 +20,9 @@ Eres un worker de evaluación de ofertas de empleo for the candidate (read name 
 | llms.txt | `llms.txt (if exists)` | SIEMPRE |
 | article-digest.md | `article-digest.md (project root)` | SIEMPRE (proof points) |
 | i18n.ts | `i18n.ts (if exists, optional)` | Solo entrevistas/deep |
-| cv-template.html | `templates/cv-template.html` | Para PDF |
-| generate-pdf.mjs | `generate-pdf.mjs` | Para PDF |
+| cv-altacv.tex | `templates/cv-altacv.tex` | Para PDF (plantilla AltaCV, la del proyecto) |
+| build-cv-altacv.mjs | `build-cv-altacv.mjs` | Para PDF (payload JSON → .tex) |
+| generate-latex.mjs | `generate-latex.mjs` | Para PDF (.tex → .pdf, valida y compila) |
 
 **REGLA: NUNCA escribir en cv.md ni i18n.ts.** Son read-only.
 **REGLA: NUNCA hardcodear métricas.** Leerlas de cv.md + article-digest.md en el momento.
@@ -284,7 +285,7 @@ next_action: "{one concrete next step}"
 
 **Gate:** Read `config/profile.yml` → `auto_pdf_score_threshold`. If the key is absent, default to **`3.0`** (the original gate of Path A). This step ONLY runs when the score from Paso 2 is **≥ the resolved threshold**. For everything below it, skip this entire step — the user can generate a tailored PDF on demand later via `/career-ops pdf {company-slug}` using the report from Paso 3 as input.
 
-**Rationale:** Generating a tailored PDF costs ~30–60s per offer (Playwright launch + HTML render) and produces files that often go unused — most roles score 2.x/3.x and never reach application. The `3.0` default matches Path A's original behavior; raise `auto_pdf_score_threshold` (e.g. `4.0`) to pre-generate fewer PDFs, or set `0` to generate one for every offer. Both Path A (`/career-ops pipeline`) and Path B (this batch worker) read the same config key for consistency.
+**Rationale:** Generating a tailored PDF costs ~30–60s per offer (payload build + pdfLaTeX compile) and produces files that often go unused — most roles score 2.x/3.x and never reach application. The `3.0` default matches Path A's original behavior; raise `auto_pdf_score_threshold` (e.g. `4.0`) to pre-generate fewer PDFs, or set `0` to generate one for every offer. Both Path A (`/career-ops pipeline`) and Path B (this batch worker) read the same config key for consistency.
 
 **If score < threshold:**
 - Skip steps 1–14 below.
@@ -295,26 +296,62 @@ next_action: "{one concrete next step}"
 
 **If score ≥ threshold**, generate the tailored PDF:
 
-1. Lee `cv.md` + `i18n.ts`
+1. Lee `cv.md` + `config/profile.yml`
 2. Extrae 15-20 keywords del JD
 3. Detecta idioma del JD → idioma del CV (EN default)
-4. Detecta ubicación empresa → formato papel: US/Canada → `letter`, resto → `a4`
-5. Detecta arquetipo → adapta framing
-6. Reescribe Professional Summary inyectando keywords
-7. Selecciona top 3-4 proyectos más relevantes
-8. Reordena bullets de experiencia por relevancia al JD
-9. Construye competency grid (6-8 keyword phrases)
-10. Inyecta keywords en logros existentes (**NUNCA inventa**)
-11. Genera HTML completo desde template (lee `templates/cv-template.html`)
-12. Escribe HTML a `/tmp/cv-candidate-{company-slug}.html`
-13. Ejecuta:
-```bash
-node generate-pdf.mjs \
-  /tmp/cv-candidate-{company-slug}.html \
-  output/cv-candidate-{company-slug}-{{DATE}}.pdf \
-  --format={letter|a4}
+4. Detecta arquetipo → adapta framing
+5. Reescribe Professional Summary inyectando keywords
+6. Selecciona top 3-4 proyectos/roles más relevantes
+7. Reordena bullets de experiencia por relevancia al JD
+8. Construye `skill_tags` (6-8 keyword phrases, agrupadas en filas)
+9. Inyecta keywords en logros existentes (**NUNCA inventa**)
+10. Escribe el payload JSON a `/tmp/cv-candidate-{company-slug}.json` con **este** esquema
+    (es el de AltaCV — NO el de `modes/latex.md`, que describe la plantilla clásica):
+
+```json
+{
+  "name": "<config/profile.yml full_name>",
+  "tagline": "<título objetivo, p.ej. el rol del JD>",
+  "personal": {
+    "phone": "...", "email": "...", "location": "...",
+    "linkedin": "<handle, sin URL>", "github": "<handle>",
+    "citizenship": ["..."]
+  },
+  "summary": "<professional summary reescrito con keywords>",
+  "experience": [
+    { "role": "...", "company": "...", "company_url": "", "dates": "...",
+      "location": "...", "bullets": ["...", "..."] }
+  ],
+  "achievements": [{ "icon": "faGem", "title": "...", "detail": "..." }],
+  "skill_tags": [["Kw1", "Kw2"], ["Kw3"]],
+  "education": [{ "degree": "...", "institution": "...", "dates": "...", "location": "" }],
+  "certifications": [{ "title": "...", "detail": "" }],
+  "languages": [{ "name": "English", "level": 5 }],
+  "previous_experience": [{ "role": "...", "company": "...", "dates": "...", "location": "" }]
+}
 ```
-14. Reporta: ruta PDF, nº páginas, % cobertura keywords
+
+  - `languages[].level` es 1-5. `icon` debe ser un icono FontAwesome válido (`faGem`, `faHeart`, `faChartLine`…).
+  - **No escapes LaTeX**: `build-cv-altacv.mjs` escapa todo. Pasa texto plano.
+  - La foto se resuelve sola desde `assets/headshot.png` — no la pongas en el payload.
+
+11. Ejecuta (los dos pasos; el segundo valida Y compila):
+```bash
+node build-cv-altacv.mjs \
+  /tmp/cv-candidate-{company-slug}.json \
+  output/cv-candidate-{company-slug}-{{DATE}}.tex
+
+node generate-latex.mjs \
+  output/cv-candidate-{company-slug}-{{DATE}}.tex \
+  output/cv-candidate-{company-slug}-{{DATE}}.pdf
+```
+
+12. **Verifica que el PDF existe antes de reportar éxito.** `generate-latex.mjs`
+    devuelve JSON con `"compiled": true|false`; si es `false`, lee `compileError`.
+    Un `.tex` válido NO implica PDF: si falta un paquete LaTeX el compilador aborta
+    sin generar nada. Si `compiled` es `false` o el fichero no existe, trata el PDF
+    como no generado (`pdf_emoji` = `❌`, `"pdf": null`) e incluye el error en las notas.
+13. Reporta: ruta .tex, ruta PDF, tamaño, % cobertura keywords
 
 On success, in Paso 5 use `pdf_emoji` = `✅` and in Paso 6 set `"pdf"` to the output path.
 
