@@ -7,10 +7,12 @@
  * token is still required as defense in depth.
  *
  * Flow per accepted URL:
- *   POST /ingest {url, note}
+ *   POST /ingest {url, note, force}
  *     → bearer-token check          (401 on mismatch)
  *     → reject private/invalid URL  (400; reuses the scan guard)
- *     → dedup vs scan-history + tracker (200 {duplicate:true} if seen)
+ *     → dedup vs the batch queue + scan-history + tracker
+ *       (200 {duplicate:true, id, status, report_num} if already submitted;
+ *        `force:true` skips this and starts a genuinely new job)
  *     → append a row to batch/batch-input.tsv
  *     → kick a single-flight batch-runner drain
  *     → 202 {accepted:true, id}
@@ -35,8 +37,13 @@ const PORT = Number(process.env.CAREEROPS_INGEST_PORT || 8765);
 const TOKEN = process.env.CAREEROPS_INGEST_TOKEN || '';
 const MAX_BODY_BYTES = 64 * 1024;
 
-const INPUT_FILE = join(ROOT, 'batch', 'batch-input.tsv');
-const STATE_FILE = join(ROOT, 'batch', 'batch-state.tsv');
+// One knob for the whole queue — input, state and runner move together — so the
+// dedup and force paths can be exercised against a throwaway copy. A stray row
+// in the real queue costs ~6 minutes of worker time.
+const BATCH_DIR = process.env.CAREEROPS_BATCH_DIR || join(ROOT, 'batch');
+const INPUT_FILE = join(BATCH_DIR, 'batch-input.tsv');
+const STATE_FILE = join(BATCH_DIR, 'batch-state.tsv');
+const RUNNER = join(BATCH_DIR, 'batch-runner.sh');
 const SCAN_HISTORY = join(ROOT, 'data', 'scan-history.tsv');
 const APPLICATIONS = join(ROOT, 'data', 'applications.md');
 const REPORTS_DIR = join(ROOT, 'reports');
@@ -66,18 +73,6 @@ function nextId() {
   return max + 1;
 }
 
-function isDuplicate(url) {
-  // scan-history.tsv: url is column 0.
-  for (const line of readLines(SCAN_HISTORY)) {
-    if (line.split('\t')[0]?.trim() === url) return true;
-  }
-  // tracker: a row that mentions the exact URL is already known.
-  try {
-    if (existsSync(APPLICATIONS) && readFileSync(APPLICATIONS, 'utf8').includes(url)) return true;
-  } catch { /* ignore */ }
-  return false;
-}
-
 // ── status / evaluation lookups ──────────────────────────────────────────────
 // batch-state.tsv columns: id url status started_at completed_at report_num score error retries
 function readStateRow(id) {
@@ -103,28 +98,87 @@ function readInputRow(id) {
 
 const clean = (v) => (v && String(v).trim() && String(v).trim() !== '-' ? String(v).trim() : null);
 
-// Reverse lookup: find the prior job row for a URL (batch-state.tsv col 1 = url),
-// so a duplicate submission can still be fetched via /status and /evaluation.
-function findStateByUrl(url) {
+const num = (v) => {
+  const s = clean(v);
+  return s !== null && !Number.isNaN(Number(s)) ? Number(s) : null;
+};
+
+// ── dedup ────────────────────────────────────────────────────────────────────
+// The batch queue is the ONLY place an ingest submission's url is recorded:
+// scan-history.tsv belongs to the portal scanner and the tracker has no url
+// column, so a dedup check reading just those two can never match a resubmit.
+// That is how the same posting got evaluated five times on 2026-08-11, ~6
+// minutes of worker time each.
+
+// batch-runner.sh vocabulary. `failed` is deliberately in neither set: a run
+// that died should be retryable by simply pasting the link again.
+const RUNNING = new Set(['processing', 'rate_limited', 'paused_rate_limit']);
+const FINISHED = new Set(['completed', 'skipped']);
+
+// Reverse lookup: the prior job for a URL (batch-state.tsv col 1 = url), so a
+// duplicate submission can still be fetched via /status and /evaluation.
+// Highest id wins — a url accumulates a row per run (forced re-scores, retries)
+// and only the newest one describes what is happening now; the first match is
+// usually a superseded row with no report number. batch-input.tsv is consulted
+// too: between accepting a job and the runner reaching it there is no state row
+// at all, and that gap is exactly when the impatient second paste arrives.
+function findJobByUrl(url) {
+  let best = null;
+  const consider = (rawId, row) => {
+    const id = Number.parseInt(rawId, 10);
+    if (!Number.isInteger(id) || (best && best.id >= id)) return;
+    best = { id, ...row };
+  };
   for (const line of readLines(STATE_FILE)) {
     const c = line.split('\t');
-    if (c[1]?.trim() === url) {
-      const id = clean(c[0]);
-      return { id: id ? Number(id) : null, report_num: clean(c[5]) };
-    }
+    if (c[1]?.trim() !== url) continue;
+    const status = clean(c[2]) || 'unknown';
+    consider(c[0], {
+      status, report_num: clean(c[5]), score: num(c[6]),
+      in_progress: RUNNING.has(status), finished: FINISHED.has(status),
+    });
   }
+  for (const line of readLines(INPUT_FILE)) {
+    const c = line.split('\t');
+    if (c[1]?.trim() !== url) continue;
+    consider(c[0], { status: 'queued', report_num: null, score: null, in_progress: true, finished: false });
+  }
+  return best && (best.in_progress || best.finished) ? best : null;
+}
+
+// A url known only from a scan or a tracker row: it was seen, but there is no
+// job to point the caller at.
+const SEEN = { id: null, status: 'seen', report_num: null, score: null, in_progress: false, finished: false };
+
+// Ordered by strength: a batch row can say "still running" or "already scored";
+// the other two sources only prove the url crossed the system at some point.
+function findDuplicate(url) {
+  const job = findJobByUrl(url);
+  if (job) return job;
+  // scan-history.tsv: url is column 0.
+  for (const line of readLines(SCAN_HISTORY)) {
+    if (line.split('\t')[0]?.trim() === url) return SEEN;
+  }
+  // tracker: a row that mentions the exact URL is already known.
+  try {
+    if (existsSync(APPLICATIONS) && readFileSync(APPLICATIONS, 'utf8').includes(url)) return SEEN;
+  } catch { /* ignore */ }
   return null;
+}
+
+// Boolean face for the tracker routes' jd-text dedup, which only asks yes/no.
+function isDuplicate(url) {
+  return findDuplicate(url) !== null;
 }
 
 // Light status: queued → processing → completed | failed | rate_limited.
 function statusPayload(id) {
   const s = readStateRow(id);
   if (s) {
-    const scoreStr = clean(s.score);
     return {
       found: true, id: Number(id), status: s.status,
       done: s.status === 'completed',
-      score: scoreStr !== null && !Number.isNaN(Number(scoreStr)) ? Number(scoreStr) : null,
+      score: num(s.score),
       report_num: clean(s.report_num), url: s.url, error: clean(s.error),
     };
   }
@@ -224,7 +278,7 @@ function drain() {
   if (draining) { rerun = true; return; }
   draining = true;
   log('draining: starting batch-runner');
-  const child = spawn('bash', ['batch/batch-runner.sh', '--parallel', '1'], {
+  const child = spawn('bash', [RUNNER, '--parallel', '1'], {
     cwd: ROOT,
     stdio: 'inherit',
   });
@@ -362,10 +416,24 @@ const server = http.createServer((req, res) => {
     const guard = rejectPrivateOrInvalid(url);
     if (guard) return send(res, 400, { error: 'rejected url', code: guard.code, reason: guard.reason });
 
-    if (isDuplicate(url)) {
-      const prior = findStateByUrl(url);
-      log(`duplicate: ${url}${prior?.id ? ` (id ${prior.id})` : ''}`);
-      return send(res, 200, { accepted: false, duplicate: true, url, id: prior?.id ?? null, report_num: prior?.report_num ?? null });
+    // Escape hatch for a posting that changed or a deliberate re-score. Explicit
+    // only — never inferred — because the default has to be "don't pay for the
+    // same evaluation twice".
+    const force = parsed.force === true;
+    const prior = force ? null : findDuplicate(url);
+    if (prior) {
+      log(`duplicate: ${url} (${prior.status}${prior.id ? `, id ${prior.id}` : ''})`);
+      return send(res, 200, {
+        accepted: false, duplicate: true, url,
+        id: prior.id, report_num: prior.report_num,
+        status: prior.status, in_progress: prior.in_progress, score: prior.score,
+        message: prior.in_progress
+          ? `already submitted as id ${prior.id} and still ${prior.status} — poll /status/${prior.id} instead of resubmitting`
+          : prior.id
+            ? `already evaluated as id ${prior.id}${prior.report_num ? ` (report ${prior.report_num})` : ''} — fetch it with /evaluation/${prior.id}`
+            : 'already seen by a portal scan or an existing tracker row',
+        hint: 'resubmit with {"force": true} to evaluate it again',
+      });
     }
 
     const id = nextId();
@@ -375,9 +443,9 @@ const server = http.createServer((req, res) => {
       console.error('[ingest] append failed:', err.message);
       return send(res, 500, { error: 'enqueue failed' });
     }
-    log(`accepted id=${id} ${url}`);
+    log(`accepted id=${id}${force ? ' (force)' : ''} ${url}`);
     drain();
-    return send(res, 202, { accepted: true, id, url });
+    return send(res, 202, { accepted: true, id, url, forced: force });
   });
 });
 

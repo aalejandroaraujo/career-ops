@@ -42,6 +42,10 @@ const eq = (got, want, m) => (got === want ? pass(m) : fail(`${m} — got ${JSON
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
 const UID = 'ca_01KYMD5T20QWX9J9NGAN5NNF20';
+// Three fates for a submitted URL: brand new, already running, already scored.
+const NEW_URL = 'https://boards.example.com/acme/jobs/new';
+const RUNNING_URL = 'https://boards.example.com/acme/jobs/running';
+const DONE_URL = 'https://boards.example.com/acme/jobs/done';
 
 // ── stub ingest server ───────────────────────────────────────────────────────
 // Records what the MCP server asked for, so we can assert the proxying is right.
@@ -70,6 +74,32 @@ const stub = http.createServer((req, res) => {
     if (path === '/tracker/followups') return json(200, { count: 1, rows: [{ company: 'EPAM' }], markdown: '| Company |\n|---|\n| EPAM |' });
     if (path === '/tracker/jd-text') return json(202, { accepted: true, job_id: 42, jd_file: 'jds/2026-07-28_acme.md', url: 'local:jds/2026-07-28_acme.md', message: 'queued — job_id is NOT an app_uid' });
     if (path === '/tracker/conflict') return json(409, { error: 'etag_mismatch', current: { status: 'Applied' } });
+
+    // The dedup shapes ingest-server.mjs actually returns, so the MCP mapping is
+    // asserted against the real contract rather than an invented one.
+    if (path === '/ingest' && req.method === 'POST') {
+      const b = seen.at(-1).body || {};
+      const hint = 'resubmit with {"force": true} to evaluate it again';
+      if (b.force) return json(202, { accepted: true, id: 99, url: b.url, forced: true });
+      if (b.url === RUNNING_URL) {
+        return json(200, {
+          accepted: false, duplicate: true, url: b.url, id: 27, report_num: null,
+          status: 'processing', in_progress: true, score: null,
+          message: 'already submitted as id 27 and still processing — poll /status/27 instead of resubmitting', hint,
+        });
+      }
+      if (b.url === DONE_URL) {
+        return json(200, {
+          accepted: false, duplicate: true, url: b.url, id: 32, report_num: '038',
+          status: 'completed', in_progress: false, score: 4,
+          message: 'already evaluated as id 32 (report 038) — fetch it with /evaluation/32', hint,
+        });
+      }
+      return json(202, { accepted: true, id: 50, url: b.url, forced: false });
+    }
+    if (path === '/status/32') return json(200, { found: true, id: 32, status: 'completed', done: true, score: 4, report_num: '038', url: DONE_URL });
+    if (path.startsWith('/status/')) return json(200, { found: true, id: Number(path.slice(8)), status: 'processing', done: false, url: RUNNING_URL });
+    if (path === '/evaluation/32') return json(200, { found: true, id: 32, status: 'completed', done: true, report_num: '038', app_uid: UID, evaluation: { score: 4, company: 'Acme' } });
     return json(404, { error: 'not found' });
   });
 });
@@ -86,6 +116,10 @@ const mcp = spawn(process.execPath, [join(ROOT, 'mcp-server.mjs')], {
     CAREEROPS_INGEST_BASE: `http://127.0.0.1:${stubPort}`,
     CAREEROPS_INGEST_TOKEN: 'stubtok',
     CAREEROPS_MCP_TOKEN: 'mcptok',
+    // evaluate_and_wait's real cadence is 12s × 30; collapse it so the
+    // still-running path can be asserted in milliseconds.
+    CAREEROPS_MCP_WAIT_POLL_MS: '20',
+    CAREEROPS_MCP_WAIT_MAX_POLLS: '2',
   },
   stdio: 'ignore',
 });
@@ -169,6 +203,16 @@ try {
       'update_status states the status vocabulary is closed');
     eq(/note/i.test(byName.update_status.description), true,
       'update_status explains that detail belongs in the note');
+
+    // A duplicate is only useful if the model reports it instead of retrying.
+    for (const t of ['evaluate_url', 'evaluate_and_wait']) {
+      eq(/duplicate/i.test(byName[t].description), true, `${t} tells the model what a duplicate means`);
+      eq(/only when the user explicitly asks|ONLY when the user explicitly asks/.test(byName[t].description), true,
+        `${t} restricts force to an explicit user request`);
+      eq('force' in (byName[t].inputSchema.properties || {}), true, `${t} exposes a force flag`);
+    }
+    eq(/get_evaluation/.test(byName.evaluate_url.description), true,
+      'evaluate_url points at the existing evaluation instead of a resubmit');
   }
 
   console.log('\n3. Id-confusion guards (the failure this design exists to prevent)');
@@ -306,6 +350,45 @@ try {
     } finally {
       dead.kill();
     }
+  }
+
+  console.log('\n9. Duplicate submissions and the force escape hatch');
+  {
+    seen.length = 0;
+    const fresh = await callTool('evaluate_url', { url: NEW_URL });
+    eq(fresh.parsed.accepted, true, 'a new URL is accepted');
+    eq(fresh.parsed.id, 50, 'the job id comes back');
+    eq(seen[0].body.force, false, 'force defaults to false on the wire');
+
+    const running = await callTool('evaluate_url', { url: RUNNING_URL });
+    eq(running.parsed.duplicate, true, 'a URL already being evaluated comes back as a duplicate');
+    eq(running.parsed.in_progress, true, 'the model is told it is IN PROGRESS');
+    eq(running.parsed.id, 27, 'the existing id is returned so the user can be given it');
+    eq(running.isError, false, 'a duplicate is a normal result, not an error');
+
+    const done = await callTool('evaluate_url', { url: DONE_URL });
+    eq(done.parsed.duplicate, true, 'an already-evaluated URL comes back as a duplicate');
+    eq(done.parsed.in_progress, false, 'it is not reported as in progress');
+    eq(done.parsed.report_num, '038', 'the previous report number is returned');
+    eq(done.parsed.score, 4, 'the previous score is returned, so no re-run is needed to answer');
+
+    seen.length = 0;
+    const forced = await callTool('evaluate_url', { url: DONE_URL, force: true });
+    eq(seen[0].body.force, true, 'force:true reaches the ingest server');
+    eq(forced.parsed.accepted, true, 'force bypasses dedup and creates a new job');
+    eq(forced.parsed.id, 99, 'the forced job gets its own id');
+    eq(forced.parsed.forced, true, 'the response records that it was forced');
+
+    // evaluate_and_wait must never present a prior evaluation as a fresh one.
+    const waited = await callTool('evaluate_and_wait', { url: DONE_URL });
+    eq(waited.parsed.duplicate, true, 'evaluate_and_wait flags the reused evaluation');
+    eq(waited.parsed.report_num, '038', 'it returns the existing evaluation instead of re-running');
+    eq(waited.parsed.evaluation.score, 4, 'the parsed evaluation rides along');
+
+    const stillRunning = await callTool('evaluate_and_wait', { url: RUNNING_URL });
+    eq(stillRunning.parsed.status, 'running', 'a duplicate still in flight is waited on, not resubmitted');
+    eq(stillRunning.parsed.id, 27, 'the id of the in-flight job is handed back');
+    eq(stillRunning.parsed.duplicate, true, 'and it is still flagged as a duplicate');
   }
 } finally {
   mcp.kill();

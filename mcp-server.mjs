@@ -67,8 +67,16 @@ async function ingest(path, { method = 'GET', body, headers: extra } = {}) {
 
 // map an /ingest POST response into a clean, typed tool result
 function mapIngest({ status, json }) {
-  if (status === 202) return { accepted: true, id: json.id, status: 'queued', url: json.url };
-  if (status === 200 && json.duplicate) return { duplicate: true, id: json.id ?? null, report_num: json.report_num ?? null, url: json.url };
+  if (status === 202) return { accepted: true, id: json.id, status: 'queued', url: json.url, forced: Boolean(json.forced) };
+  // Duplicates carry enough to answer the user without re-running anything:
+  // whether it is still in flight, and the score/report if it already finished.
+  if (status === 200 && json.duplicate) {
+    return {
+      duplicate: true, id: json.id ?? null, report_num: json.report_num ?? null, url: json.url,
+      status: json.status ?? null, in_progress: Boolean(json.in_progress),
+      score: json.score ?? null, message: json.message, hint: json.hint,
+    };
+  }
   if (status === 400 && json.code) return { error: 'rejected_url', reason: json.reason || json.error };
   if (status === 400) return { error: 'missing_url', message: json.error };
   if (status === 401) return { error: 'unauthorized' };
@@ -137,13 +145,21 @@ function buildServer() {
       'WHEN TO USE: a message IS or CONTAINS a job-posting URL — a known ATS/board (greenhouse.io, lever.co, ashbyhq.com, myworkdayjobs.com, smartrecruiters.com, workable.com, breezy.hr, recruitee.com, teamtailor.com, icims.com, jobvite.com, bamboohr.com), or a company careers page whose path contains /careers, /jobs, /job/, /positions, or /openings.',
       'DO NOT USE for: blog/news/article links, LinkedIn feed posts, a homepage with no job path, or a bare company name with no URL.',
       'IMPORTANT: do NOT browse, scrape, web_search, or summarize the posting yourself — career-ops fetches and evaluates it. This tool is the ONLY correct way to handle a job link.',
+      '',
+      'IF THE RESULT HAS duplicate:true, this URL was already submitted and you must NOT submit it again. Report the existing evaluation to the user instead:',
+      '  · in_progress:true → tell them it is already being evaluated, give them the id, and check it with get_status.',
+      '  · in_progress:false with an id → call get_evaluation with that id and give them THAT result (score, report_num).',
+      'force:true bypasses the duplicate check and starts a genuinely new evaluation, costing several minutes of work. Use it ONLY when the user explicitly asks to re-evaluate/re-score, or tells you the posting changed — never on your own initiative just because a duplicate came back.',
     ].join('\n'),
     inputSchema: {
       url: z.string().describe('The job-posting URL (public ATS/careers page, not LinkedIn).'),
       note: z.string().optional().describe('Optional free-text note, e.g. "from telegram: @user".'),
+      force: z.boolean().optional().describe('Re-evaluate even if this URL was already submitted. Only when the user explicitly asks for a re-evaluation.'),
     },
-  }, async ({ url, note }) => {
-    const r = mapIngest(await ingest('/ingest', { method: 'POST', body: { url, note: note || 'from hermes' } }));
+  }, async ({ url, note, force }) => {
+    const r = mapIngest(await ingest('/ingest', {
+      method: 'POST', body: { url, note: note || 'from hermes', force: force === true },
+    }));
     return asText(r, Boolean(r.error));
   });
 
@@ -185,23 +201,33 @@ function buildServer() {
 
   server.registerTool('evaluate_and_wait', {
     title: 'Evaluate a job URL and wait for the result',
-    description: 'Convenience: submit the URL, wait for the evaluation (hard cap ~6 min), and return the full result in one call. If still running at the cap, returns {id,status} so you can call get_evaluation later. Same URL guardrails as evaluate_url — do NOT scrape the posting yourself.',
+    description: [
+      'Convenience: submit the URL, wait for the evaluation (hard cap ~6 min), and return the full result in one call. If still running at the cap, returns {id,status} so you can call get_evaluation later. Same URL guardrails as evaluate_url — do NOT scrape the posting yourself.',
+      'If the URL was already submitted, nothing is re-run: the result comes back with duplicate:true, carrying the EXISTING evaluation (or waiting on the one already in flight). Tell the user this is the previous evaluation rather than pretending it is fresh, and do not resubmit.',
+      'force:true bypasses the duplicate check and spends several minutes on a genuinely new evaluation. Use it ONLY when the user explicitly asks to re-evaluate/re-score, or says the posting changed.',
+    ].join('\n'),
     inputSchema: {
       url: z.string().describe('The job-posting URL.'),
       note: z.string().optional(),
+      force: z.boolean().optional().describe('Re-evaluate even if this URL was already submitted. Only when the user explicitly asks for a re-evaluation.'),
     },
-  }, async ({ url, note }) => {
-    const sub = mapIngest(await ingest('/ingest', { method: 'POST', body: { url, note: note || 'from hermes' } }));
+  }, async ({ url, note, force }) => {
+    const sub = mapIngest(await ingest('/ingest', {
+      method: 'POST', body: { url, note: note || 'from hermes', force: force === true },
+    }));
     if (sub.error) return asText(sub, true);
     const id = sub.id;
     if (!id) return asText({ ...sub, message: 'no id to wait on' });
+    const dup = Boolean(sub.duplicate);
     for (let i = 0; i < WAIT_MAX_POLLS; i++) {
       const { json } = await ingest(`/status/${id}`);
-      if (json.status === 'completed') return asText((await ingest(`/evaluation/${id}`)).json);
-      if (json.status === 'failed') return asText({ id, status: 'failed', message: json.error || 'evaluation failed' });
+      // duplicate rides along so the model reports "already evaluated" instead
+      // of presenting a months-old report as if it had just been produced.
+      if (json.status === 'completed') return asText({ ...(await ingest(`/evaluation/${id}`)).json, duplicate: dup });
+      if (json.status === 'failed') return asText({ id, status: 'failed', message: json.error || 'evaluation failed', duplicate: dup });
       await sleep(WAIT_POLL_MS);
     }
-    return asText({ id, status: 'running', message: 'still evaluating past the wait cap — call get_evaluation later', duplicate: sub.duplicate || false });
+    return asText({ id, status: 'running', message: 'still evaluating past the wait cap — call get_evaluation later', duplicate: dup });
   });
 
   // ── tracker tools ─────────────────────────────────────────────────────────
