@@ -35,6 +35,14 @@ const MCP_TOKEN = process.env.CAREEROPS_MCP_TOKEN || ''; // optional inbound aut
 const MAX_BODY = 256 * 1024;
 const WAIT_POLL_MS = Number(process.env.CAREEROPS_MCP_WAIT_POLL_MS || 12000);
 const WAIT_MAX_POLLS = Number(process.env.CAREEROPS_MCP_WAIT_MAX_POLLS || 30); // ~6 min cap
+// get_status long-poll window. An LLM has no timer: telling it to "poll every
+// ~15s" produces a tight retry loop instead, because calling the tool again is
+// the only action available to it. On 2026-08-11 a Hermes run spent 57 of its
+// 60 tool-call iterations on get_status in about a minute and died before it
+// could report the result. Blocking here puts the wait where a real sleep
+// exists, so a 6-minute evaluation costs ~8 iterations instead of ~300.
+const STATUS_LONGPOLL_MS = Number(process.env.CAREEROPS_MCP_STATUS_LONGPOLL_MS || 45000);
+const STATUS_POLL_MS = Number(process.env.CAREEROPS_MCP_STATUS_POLL_MS || 3000);
 
 const log = (m) => console.log(`[mcp] ${new Date().toISOString()} ${m}`);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -141,14 +149,26 @@ function buildServer() {
 
   server.registerTool('get_status', {
     title: 'Get evaluation status',
-    description: 'Poll the status of a submitted job by id: queued → processing → completed | failed. Poll every ~15s; most finish in 2–6 minutes. Once status is "completed", call get_evaluation.',
+    description: [
+      'Status of a submitted job by id: queued → processing → completed | failed.',
+      'This call BLOCKS for up to ~45s, returning early the moment the job finishes — the waiting happens inside the tool, so call it again straight away rather than trying to pace yourself. Most evaluations finish in 2–6 minutes, so expect a handful of calls, not dozens.',
+      'If you get the same non-terminal status many times in a row, the evaluation is simply still running: stop polling, tell the user it is in progress, and give them the id to check later. Do NOT keep calling until you run out of turns.',
+      'Once status is "completed", call get_evaluation. If you are submitting and waiting in one go, prefer evaluate_and_wait — it returns the finished result in a single call.',
+    ].join('\n'),
     inputSchema: { id: idSchema },
   }, async ({ id }) => {
-    const { status, json } = await ingest(`/status/${String(id)}`);
-    if (status === 404) return asText({ found: false, id: Number(id) });
-    if (status === 401) return asText({ error: 'unauthorized' }, true);
-    if (status === 0) return asText({ error: 'unreachable', message: json.message }, true);
-    return asText(json);
+    const deadline = Date.now() + STATUS_LONGPOLL_MS;
+    for (;;) {
+      const { status, json } = await ingest(`/status/${String(id)}`);
+      if (status === 404) return asText({ found: false, id: Number(id) });
+      if (status === 401) return asText({ error: 'unauthorized' }, true);
+      if (status === 0) return asText({ error: 'unreachable', message: json.message }, true);
+      // Terminal states return immediately; anything else waits out the window.
+      if (json.status === 'completed' || json.status === 'failed') return asText(json);
+      const left = deadline - Date.now();
+      if (left <= 0) return asText({ ...json, waited_ms: STATUS_LONGPOLL_MS, hint: 'still running — call get_status again, or report progress to the user and check back later' });
+      await sleep(Math.min(STATUS_POLL_MS, left));
+    }
   });
 
   server.registerTool('get_evaluation', {
