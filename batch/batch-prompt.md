@@ -16,13 +16,30 @@ Eres un worker de evaluación de ofertas de empleo for the candidate (read name 
 |---------|---------------|--------|
 | cv.md | `cv.md (project root)` | SIEMPRE |
 | _profile.md | `modes/_profile.md (if exists)` | SIEMPRE (user customizations: archetypes, role_shape, location policy, comp targets) |
+| _custom.md | `modes/_custom.md (if exists)` | ALWAYS (the user's house rules and output preferences; Path A already honours them, so must this worker) |
 | profile.yml | `config/profile.yml (if exists)` | SIEMPRE (candidate identity, comp range, role_shape rules) |
 | llms.txt | `llms.txt (if exists)` | SIEMPRE |
 | article-digest.md | `article-digest.md (project root)` | SIEMPRE (proof points) |
 | i18n.ts | `i18n.ts (if exists, optional)` | Solo entrevistas/deep |
-| cv-altacv.tex | `templates/cv-altacv.tex` | Para PDF (plantilla AltaCV, la del proyecto) |
-| build-cv-altacv.mjs | `build-cv-altacv.mjs` | Para PDF (payload JSON → .tex) |
-| generate-latex.mjs | `generate-latex.mjs` | Para PDF (.tex → .pdf, valida y compila) |
+| cv-altacv.tex | `templates/cv-altacv.tex` | For PDF (AltaCV template — this project's CV format) |
+| build-cv-altacv.mjs | `build-cv-altacv.mjs` | For PDF (JSON payload → .tex) |
+| generate-latex.mjs | `generate-latex.mjs` | For PDF (.tex → .pdf; validates and compiles) |
+
+**RULE: NEVER declare a posting closed without definitive proof.**
+A false "closed" is the most expensive error this system can make — it makes the
+user miss a real job. On 2026-08-11 a worker marked a role *"CLOSED (confirmed by
+3 sources)"* and sank its score from 4.6 to 2.1. The posting was open and the user
+had been **referred** to it.
+- `check-liveness.mjs` → `uncertain` means **uncertain**, NOT expired.
+  "content present but no visible apply control found" is **not** proof of closure:
+  the button may sit behind JS, behind a login, or be geo-restricted.
+- Only these count as closure: a **definitive** `expired` from the ATS API, or
+  explicit page text ("no longer accepting applications", "position filled").
+- With no definitive proof: **evaluate as normal**, put
+  `**Verification:** unconfirmed (batch mode)` in the header, and carry on.
+- **Availability NEVER lowers the fit score.** The score measures candidate↔role
+  fit. Doubts about availability belong in `**Legitimacy:**` and `next_action` —
+  never in the score, and never as a `Discarded` status.
 
 **REGLA: NUNCA escribir en cv.md ni i18n.ts.** Son read-only.
 **REGLA: NUNCA hardcodear métricas.** Leerlas de cv.md + article-digest.md en el momento.
@@ -296,28 +313,60 @@ next_action: "{one concrete next step}"
 
 **If score ≥ threshold**, generate the tailored PDF:
 
-1. Lee `cv.md` + `config/profile.yml`
-2. Extrae 15-20 keywords del JD
-3. Detecta idioma del JD → idioma del CV (EN default)
-4. Detecta arquetipo → adapta framing
-5. Reescribe Professional Summary inyectando keywords
-6. Selecciona top 3-4 proyectos/roles más relevantes
-7. Reordena bullets de experiencia por relevancia al JD
-8. Construye `skill_tags` (6-8 keyword phrases, agrupadas en filas)
-9. Inyecta keywords en logros existentes (**NUNCA inventa**)
-10. Escribe el payload JSON a `/tmp/cv-candidate-{company-slug}.json` con **este** esquema
-    (es el de AltaCV — NO el de `modes/latex.md`, que describe la plantilla clásica):
+1. Read `cv.md` + `config/profile.yml`
+2. Extract 15-20 keywords from the JD
+3. Detect the JD language → CV language (EN default)
+4. Detect the archetype → adapt the framing
+5. **Write the `summary` (About Me) as POSITIONING, not as an inventory.**
+
+   This is the first thing a hiring manager reads. A summary that enumerates
+   capabilities ("I design agentic systems, Python and FastAPI, Azure, GDPR,
+   20 years in telecom") says nothing — it describes a generic competent
+   professional. It must answer **"why this person, for THIS opening?"**.
+
+   Structure (3-5 sentences, flowing prose, no lists):
+   1. **Role-matched identity.** Who they are *for this specific opening* — not
+      their current title, not a recital of their career.
+   2. **The employer's problem and their angle on it.** What this company needs
+      solved according to the JD, and how this person approaches it. This is where
+      the summary stops being generic.
+   3. **1-2 quantified proofs, chosen for THIS JD.** Not the candidate's favourite
+      metrics — the ones this employer cares about.
+   4. **The differentiator only they have.** Domain context, prior time at that
+      company or sector, an uncommon combination. If it exists, it goes here.
+
+   **Discard test:** if a sentence would be true of any competent candidate in the
+   field, cut it. "Privacy-by-design under GDPR" or "Python in production" do not
+   position — those belong in `skill_tags`, not in the About Me.
+
+   **Forbidden:** tool lists, compliance-regime lists, reciting years of experience
+   without connecting them to the role, generic adjectives ("passionate",
+   "results-oriented"), and paraphrasing the JD back at the employer.
+
+   **Hard limit:** everything must be backed by `cv.md` / `article-digest.md` /
+   `config/profile.yml`. Reframe and reorder, **never invent** — not a role, not a
+   metric, not a responsibility. No proof, no sentence.
+
+   Also apply the exit narrative from `modes/_profile.md` and any rule in
+   `modes/_custom.md` (§Output Preferences); those take precedence over the above.
+6. Select the top 3-4 most relevant projects/roles
+7. Reorder experience bullets by relevance to the JD
+8. Build `skill_tags` (6-8 keyword phrases, grouped into rows)
+9. Inject keywords into existing achievements (**NEVER invent**)
+10. Write the JSON payload to `/tmp/cv-candidate-{company-slug}.json` using **this**
+    schema (it is the AltaCV one — NOT the schema in `modes/latex.md`, which
+    documents the classic single-column template):
 
 ```json
 {
   "name": "<config/profile.yml full_name>",
-  "tagline": "<título objetivo, p.ej. el rol del JD>",
+  "tagline": "<target title, e.g. the role from the JD>",
   "personal": {
     "phone": "...", "email": "...", "location": "...",
-    "linkedin": "<handle, sin URL>", "github": "<handle>",
+    "linkedin": "<handle, no URL>", "github": "<handle>",
     "citizenship": ["..."]
   },
-  "summary": "<professional summary reescrito con keywords>",
+  "summary": "<positioning summary from step 5>",
   "experience": [
     { "role": "...", "company": "...", "company_url": "", "dates": "...",
       "location": "...", "bullets": ["...", "..."] }
@@ -331,11 +380,11 @@ next_action: "{one concrete next step}"
 }
 ```
 
-  - `languages[].level` es 1-5. `icon` debe ser un icono FontAwesome válido (`faGem`, `faHeart`, `faChartLine`…).
-  - **No escapes LaTeX**: `build-cv-altacv.mjs` escapa todo. Pasa texto plano.
-  - La foto se resuelve sola desde `assets/headshot.png` — no la pongas en el payload.
+  - `languages[].level` is 1-5. `icon` must be a valid FontAwesome icon (`faGem`, `faHeart`, `faChartLine`…).
+  - **Do not escape LaTeX**: `build-cv-altacv.mjs` escapes everything. Pass plain text.
+  - The photo resolves itself from `assets/headshot.png` — do not put it in the payload.
 
-11. Ejecuta (los dos pasos; el segundo valida Y compila):
+11. Run both steps (the second one validates AND compiles):
 ```bash
 node build-cv-altacv.mjs \
   /tmp/cv-candidate-{company-slug}.json \
@@ -346,12 +395,13 @@ node generate-latex.mjs \
   output/cv-candidate-{company-slug}-{{DATE}}.pdf
 ```
 
-12. **Verifica que el PDF existe antes de reportar éxito.** `generate-latex.mjs`
-    devuelve JSON con `"compiled": true|false`; si es `false`, lee `compileError`.
-    Un `.tex` válido NO implica PDF: si falta un paquete LaTeX el compilador aborta
-    sin generar nada. Si `compiled` es `false` o el fichero no existe, trata el PDF
-    como no generado (`pdf_emoji` = `❌`, `"pdf": null`) e incluye el error en las notas.
-13. Reporta: ruta .tex, ruta PDF, tamaño, % cobertura keywords
+12. **Verify the PDF exists before reporting success.** `generate-latex.mjs` returns
+    JSON with `"compiled": true|false`; if it is `false`, read `compileError`.
+    A valid `.tex` does NOT imply a PDF: if a LaTeX package is missing the compiler
+    aborts without producing anything. If `compiled` is `false` or the file is not
+    there, treat the PDF as not generated (`pdf_emoji` = `❌`, `"pdf": null`) and put
+    the error in the notes.
+13. Report: .tex path, PDF path, file size, keyword coverage %
 
 On success, in Paso 5 use `pdf_emoji` = `✅` and in Paso 6 set `"pdf"` to the output path.
 
