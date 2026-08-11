@@ -12,7 +12,11 @@ data/follow-ups.md
 # Per-application note + status-change ledger (User Layer)
 data/app-events.jsonl
 data/cache/ats-companies/
-reports/*.md
+# Everything under reports/ is User Layer (see DATA_CONTRACT.md). This was
+# `reports/*.md`, which only matched .md files at the top level — a subdirectory
+# such as reports/archive/ was NOT ignored and would have been committed to a
+# public repo. Match the whole tree instead.
+reports/*
 !reports/.gitkeep
 output/*
 !output/.gitkeep
