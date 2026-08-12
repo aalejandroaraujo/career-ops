@@ -347,6 +347,26 @@ next_action: "{one concrete next step}"
    4. **The differentiator only they have.** Domain context, prior time at that
       company or sector, an uncommon combination. If it exists, it goes here.
 
+   **Six rules from a real critique of a generated About Me (2026-08-12):**
+   1. **Order.** The employer's problem belongs in sentence 2, not sentence 4. The
+      differentiator (insider context, prior time at the company, an uncommon
+      combination) is promoted, never buried second-to-last.
+   2. **No stack lists.** "a FastAPI and Azure Functions service ... with pgvector
+      RAG memory, Terraform-managed and Azure-native" names five technologies and
+      positions the candidate for none of them. A hiring manager reads it as "knows
+      the usual tools". The tags already carry the stack.
+   3. **Never hedge a number.** "from about 27% to about 93%" softens the single
+      hardest piece of evidence in the whole CV. Write `27% → 93%`.
+   4. **Do not restate the JD.** "ADAO needs agent behaviour that's predictable,
+      grounded and safe at scale" hands the employer their own posting back.
+      Assert the answer instead of repeating the question.
+   5. **The closing line must sit next to what earns it.** Soft claims read as
+      tacked on when the preceding sentences evidence none of them. Put the
+      enablement/mentoring evidence immediately before the closer.
+   6. **Resolve tense for a former employer.** "the CoP I founded here" reads as
+      though the candidate still works there. For a boomerang, make the timeframe
+      unambiguous.
+
    **Discard test:** if a sentence would be true of any competent candidate in the
    field, cut it. "Privacy-by-design under GDPR" or "Python in production" do not
    position — those belong in `skill_tags`, not in the About Me.
