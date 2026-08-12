@@ -324,7 +324,19 @@ next_action: "{one concrete next step}"
    20 years in telecom") says nothing — it describes a generic competent
    professional. It must answer **"why this person, for THIS opening?"**.
 
-   Structure (3-5 sentences, flowing prose, no lists):
+   **Shape it as TWO short paragraphs, not one block.** The `summary` field
+   accepts a blank line (`\n\n` in the JSON) and `build-cv-altacv.mjs` passes it
+   through as a real LaTeX paragraph break. One 120-word slab reads as a wall of
+   text and gets skimmed; two tight paragraphs get read. Para 1 = who they are for
+   this role + the employer's problem. Para 2 = the proof and the differentiator.
+
+   **Length: 5-6 sentences, ~120 words max** (the budget set in
+   `modes/_custom.md` House Rules — splitting it across two paragraphs does not
+   shrink it). Vary sentence length: a short sentence after a long one is what
+   stops it sounding like a brick. Over ~120 words the AltaCV layout spills to a
+   third page — cut the weakest claim rather than compressing every sentence.
+
+   Structure (flowing prose, no lists):
    1. **Role-matched identity.** Who they are *for this specific opening* — not
       their current title, not a recital of their career.
    2. **The employer's problem and their angle on it.** What this company needs
@@ -339,9 +351,19 @@ next_action: "{one concrete next step}"
    field, cut it. "Privacy-by-design under GDPR" or "Python in production" do not
    position — those belong in `skill_tags`, not in the About Me.
 
-   **Forbidden:** tool lists, compliance-regime lists, reciting years of experience
-   without connecting them to the role, generic adjectives ("passionate",
+   **Forbidden:** tool lists (naming the stack — "FastAPI, Azure Functions,
+   pgvector, Terraform" — is inventory, not positioning; that belongs in
+   `skill_tags`), compliance-regime lists, reciting years of experience without
+   connecting them to the role, generic adjectives ("passionate",
    "results-oriented"), and paraphrasing the JD back at the employer.
+
+   **Read `modes/_custom.md` House Rules before writing this — they override the
+   above.** In particular: the About block is shaped by the SENIORITY of the target
+   role (a Lead/Principal/Head JD, or one asking to set standards or influence teams
+   without authority, opens with evidenced leadership; an IC/builder JD opens with
+   what the candidate builds), and the user's own closing line is kept verbatim in
+   their voice. Do not drop it as "soft skills" — its absence drew negative feedback
+   on a real application. Self-awarded adjectives are still banned; evidence is not.
 
    **Hard limit:** everything must be backed by `cv.md` / `article-digest.md` /
    `config/profile.yml`. Reframe and reorder, **never invent** — not a role, not a
