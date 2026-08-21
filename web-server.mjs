@@ -193,6 +193,40 @@ function serveStatic(res, urlPath) {
   return true;
 }
 
+/** Location substrings that mark a row as being in the primary (Swiss) market. */
+const SWISS_MARKERS = ['switzerland', 'schweiz', 'suisse', 'svizzera', 'zürich', 'zurich',
+  'bern', 'basel', 'zug', 'luzern', 'lucerne', 'genève', 'geneva', 'genf', 'lausanne',
+  'winterthur', 'st. gallen', 'lugano', 'aarau', 'chur', 'dübendorf', 'hinwil'];
+
+/**
+ * Parse the pending half of data/pipeline.md into rows for the UI.
+ *
+ * Line shape: `- [ ] {url} | {company} | {role} | {location}`.
+ * Anything malformed is skipped rather than thrown — a hand-edited inbox
+ * should never take the dashboard down.
+ *
+ * @returns {Array<{url:string, company:string, role:string, location:string, swiss:boolean}>}
+ */
+function readPipeline() {
+  const file = join(ROOT, 'data', 'pipeline.md');
+  if (!existsSync(file)) return [];
+  const rows = [];
+  let section = '';
+  for (const line of readFileSync(file, 'utf8').split('\n')) {
+    if (line.startsWith('## ')) { section = line; continue; }
+    if (!section.includes('Pending')) continue;
+    const m = line.match(/^- \[ \] (.+)$/);
+    if (!m) continue;
+    const [url = '', company = '', role = '', location = ''] = m[1].split(' | ').map(x => x.trim());
+    if (!/^https?:\/\//.test(url)) continue;
+    const loc = location.toLowerCase();
+    rows.push({ url, company, role, location, swiss: SWISS_MARKERS.some(k => loc.includes(k)) });
+  }
+  // Swiss first — the market that gets acted on.
+  rows.sort((a, b) => Number(b.swiss) - Number(a.swiss));
+  return rows;
+}
+
 /**
  * Proxy an authenticated /api/* call to the tracker API.
  *
@@ -266,6 +300,16 @@ const server = http.createServer(async (req, res) => {
   const authed = sessionValid(readCookie(req.headers.cookie, COOKIE));
 
   if (path === '/api/session') return sendJson(res, 200, { authenticated: authed });
+
+  // ── pipeline (scouted, not yet evaluated) ──────────────────────────────────
+  // Served locally rather than proxied: pipeline.md is a plain file on disk and
+  // the ingest container has no endpoint for it. Read-only by design — acting
+  // on a row still goes through the normal evaluation flow, so a browser
+  // session can look but never enqueue work.
+  if (path === '/api/pipeline') {
+    if (!authed) return sendJson(res, 401, { error: 'unauthenticated' });
+    return sendJson(res, 200, { rows: readPipeline() });
+  }
 
   // ── authenticated API proxy ────────────────────────────────────────────────
   if (path.startsWith('/api/')) {

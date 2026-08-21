@@ -48,11 +48,14 @@ $('#loginForm').addEventListener('submit', async (e) => {
   $('#password').value = '';
   showApp();
   load();
+  loadPipeline();
 });
 
 $('#logout').onclick = async () => {
   await fetch('/api/logout', { method: 'POST' });
   ROWS = [];
+  PIPE = [];
+  $('#pipeCount').textContent = '';
   showLogin();
 };
 
@@ -259,7 +262,7 @@ async function openDrawer(uid) {
 $('#drawerClose').onclick = () => showDrawer(false);
 $('#scrim').onclick = () => showDrawer(false);
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') showDrawer(false); });
-$('#search').oninput = render;
+$('#search').oninput = () => (TAB === 'pipeline' ? renderPipeline() : render());
 $('#refresh').onclick = () => load();
 $('#view').onclick = () => {
   view = view === 'cards' ? 'board' : 'cards';
@@ -267,6 +270,58 @@ $('#view').onclick = () => {
   $('#view').textContent = view === 'cards' ? '▦' : '▤';
   render();
 };
+
+// ── Scouted pipeline ─────────────────────────────────────────────────────────
+// Read-only view of data/pipeline.md: roles the scanner found that have not
+// been evaluated yet. Kept deliberately dumb — the decision to evaluate one
+// still happens in Claude Code, this just makes the queue visible.
+
+let PIPE = [];
+let TAB = 'tracker';
+
+async function loadPipeline() {
+  try {
+    const r = await fetch('/api/pipeline');
+    if (r.status === 401) { showLogin(); return; }
+    PIPE = (await r.json()).rows || [];
+    $('#pipeCount').textContent = PIPE.length ? String(PIPE.length) : '';
+    if (TAB === 'pipeline') renderPipeline();
+  } catch { /* leave the badge empty; the tracker tab still works */ }
+}
+
+function renderPipeline() {
+  const q = $('#search').value.trim().toLowerCase();
+  const rows = PIPE.filter((r) =>
+    !q || `${r.company} ${r.role} ${r.location}`.toLowerCase().includes(q));
+
+  const ch = rows.filter((r) => r.swiss).length;
+  $('#stats').innerHTML =
+    `<span>${rows.length} scouted</span><span>${ch} in Switzerland</span><span>0 evaluated</span>`;
+
+  $('#pipeline').innerHTML = rows.map((r) => `
+    <article class="card pipe-row">
+      <div class="role"><a href="${esc(r.url)}" target="_blank" rel="noopener noreferrer">${esc(r.role || 'Untitled role')}</a></div>
+      <div class="meta">${esc(r.company || '—')}</div>
+      <div class="ch">${r.swiss ? '🇨🇭 ' : ''}${esc(r.location || '—')}</div>
+    </article>`).join('');
+
+  $('#empty').hidden = rows.length > 0;
+  $('#pipeline').hidden = false;
+}
+
+function setTab(tab) {
+  TAB = tab;
+  $('#tabTracker').classList.toggle('on', tab === 'tracker');
+  $('#tabPipeline').classList.toggle('on', tab === 'pipeline');
+  const trackerView = tab === 'tracker';
+  $('#chips').hidden = !trackerView;
+  $('#view').hidden = !trackerView;
+  $('#pipeline').hidden = trackerView;
+  if (trackerView) { render(); } else { $('#rows').hidden = true; $('#board').hidden = true; renderPipeline(); }
+}
+
+$('#tabTracker').onclick = () => setTab('tracker');
+$('#tabPipeline').onclick = () => setTab('pipeline');
 
 // ── boot ─────────────────────────────────────────────────────────────────────
 $('#view').textContent = view === 'cards' ? '▦' : '▤';

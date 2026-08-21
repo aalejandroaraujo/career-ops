@@ -102,3 +102,7 @@ career-dashboard
 
 # Planning (local scratchpad)
 plan/
+
+# daily-scout single-instance lock (runtime state)
+.daily-scout.lock
+logs/daily-scout/

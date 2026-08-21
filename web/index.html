@@ -29,6 +29,10 @@
         <button id="refresh" class="icon" title="Reload" aria-label="Reload">↻</button>
         <button id="logout" class="icon" title="Sign out" aria-label="Sign out">⏻</button>
       </div>
+      <div class="tabs">
+        <button id="tabTracker" class="tab on" data-tab="tracker">Applications</button>
+        <button id="tabPipeline" class="tab" data-tab="pipeline">Scouted <span id="pipeCount" class="badge"></span></button>
+      </div>
       <div class="controls">
         <input id="search" type="search" placeholder="Search company, role, notes…" autocomplete="off" />
       </div>
@@ -39,6 +43,7 @@
       <div id="stats" class="stats"></div>
       <div id="rows" class="cards"></div>
       <div id="board" class="board" hidden></div>
+      <div id="pipeline" class="cards" hidden></div>
       <p id="empty" class="empty" hidden>Nothing here. Send a job URL or a JD to Hermes to get started.</p>
     </main>
   </div>
