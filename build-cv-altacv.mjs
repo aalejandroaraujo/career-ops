@@ -253,6 +253,8 @@ function buildSubstitutions(payload, photoBlock) {
   }
   return {
     NAME: escapeLatex(payload.name || ''),
+    PDF_AUTHOR: escapeLatex(payload.name || ''),
+    PDF_TITLE: escapeLatex([payload.name, payload.tagline].filter(Boolean).join(' | ')),
     TAGLINE: escapeLatex(payload.tagline || ''),
     PHOTO_BLOCK: photoBlock,
     PERSONAL_INFO: buildPersonalInfo(payload.personal),
