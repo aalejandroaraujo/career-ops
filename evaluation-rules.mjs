@@ -250,7 +250,7 @@ const kchf = (s) => {
   return n < 1000 ? n * 1000 : n;
 };
 
-/** Target band from profile.yml compensation.target_range ("CHF 150K–230K total ..."). */
+/** Target band from profile.yml compensation.target_range ("CHF 120K–180K total ..."). */
 export function targetBand(profile) {
   const raw = String(profile?.compensation?.target_range || '');
   const m = raw.match(/(\d{2,3}(?:[.,]\d)?)\s*K?\s*[–—-]\s*(\d{2,3}(?:[.,]\d)?)\s*K/i);
@@ -480,6 +480,11 @@ export function enforceReport(md, ctx = {}) {
       corrections.push(`comp ${scores.comp ?? 'n/a'} → ${derived} (scored on total comp CHF ${Math.round(tc.total.min / 1000)}-${Math.round(tc.total.max / 1000)}K vs target ${band ? `${band.min / 1000}-${band.max / 1000}K` : 'n/a'}, not base alone)`);
       scores.comp = derived;
     }
+  }
+
+  // A gap entry that says it does not apply is not a gap.
+  for (const g of [...softGaps]) {
+    if (/\b(not applicable|does not apply|n\/a)\b/i.test(String(g))) { softGaps.splice(softGaps.indexOf(g), 1); corrections.push(`non-gap removed from soft_gaps: ${String(g).slice(0, 60)}`); }
   }
 
   const level = summary.level || {};

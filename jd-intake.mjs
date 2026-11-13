@@ -306,6 +306,10 @@ export function detectEmploymentType(text) {
   if (/\b(freelance|freelancer|contractor|b2b|day rate|tagessatz|stundensatz|hourly rate|per hour|\/h\b|auftragsbasis|selbständig|self-employed|ltd company|outside ir35|inside ir35|contract role|contract position|mandat)\b/i.test(text)) return 'contract_b2b';
   if (/\b(festanstellung|unbefristet|permanent|full[- ]time employee|employee benefits|pensionskasse|bvg|vorsorge und sozialleistungen|cdi\b|pensum)\b/i.test(text)) return 'direct_hire';
   if (/\b\d{2,3}\s*[-–]\s*\d{2,3}\s*%/.test(text)) return 'direct_hire'; // Swiss Pensum = employment
+  // A single Pensum next to the gender marker ("(w/m/d) 100%"), or an in-house
+  // Talent Acquisition / HR contact, is a company hiring for itself.
+  if (/\((?:w\/m\/d|m\/w\/d|m\/f\/d|f\/m\/d|h\/f|f\/h)\)[^\n]{0,20}\b\d{2,3}\s*%/i.test(text)) return 'direct_hire';
+  if (/\b(talent acquisition (?:partner|specialist|manager)|hr business partner|recruiting partner)\b/i.test(text)) return 'direct_hire';
   return 'unknown';
 }
 

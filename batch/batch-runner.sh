@@ -811,6 +811,20 @@ process_offer() {
     fi
 
     local done_note="-"
+    # A CV is only trusted when it was built during this job: the build runs the
+    # output guards and cv-verify. A worker that points the report at an older
+    # PDF ("reused, not rebuilt") bypasses both.
+    local report_pdf
+    report_pdf=$(sed -nE 's/^\*\*PDF:\*\*[[:space:]]*(output\/[^[:space:]]+\.pdf).*/\1/p' "$report_glob_found" 2>/dev/null | head -1 || true)
+    if [[ -n "$report_pdf" && -f "$PROJECT_DIR/$report_pdf" ]]; then
+      local pdf_epoch start_epoch
+      pdf_epoch=$(stat -c %Y "$PROJECT_DIR/$report_pdf" 2>/dev/null || echo 0)
+      start_epoch=$(date -d "$started_at" +%s 2>/dev/null || echo 0)
+      if (( start_epoch > 0 && pdf_epoch < start_epoch )); then
+        done_note="CV reused, not rebuilt: $report_pdf predates this job - regenerate with generate_cv"
+        echo "    ⚠️  $done_note"
+      fi
+    fi
     if [[ "$cv_mode" == "force" ]]; then
       local forced_pdf
       forced_pdf=$(sed -nE 's/^\*\*PDF:\*\*[[:space:]]*(output\/[^[:space:]]+\.pdf).*/\1/p' "$report_glob_found" 2>/dev/null | head -1 || true)

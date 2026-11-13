@@ -27,6 +27,7 @@ These files contain your personal data, customizations, and work product. Update
 | `reports/*` | Your evaluation reports |
 | `output/*` | Your generated PDFs |
 | `jds/*` | Your saved job descriptions |
+| `calibration/*` | Your private calibration golden cases (real JDs, report and CV snapshots, expected decisions); `node calibrate.mjs check` runs them |
 
 ### The tracker pair, and why notes live in a separate file
 

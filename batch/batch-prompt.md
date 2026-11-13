@@ -461,6 +461,12 @@ The orchestrator runs the same command again after you exit; it is idempotent.
 
 **If score ≥ threshold**, generate the tailored PDF:
 
+**Always build; never reuse.** Even when `output/` already holds a CV for this
+company and date, run steps 10-12 again. The build is where the output guards
+(truthful titles, guarded facts, English CV) and the PDF verification run; a CV
+built before the current rules can carry exactly the defects they block. The
+orchestrator flags a report whose PDF is older than the job as "CV reused".
+
 1. Read `cv.md` + `config/profile.yml`
 2. Extract 15-20 keywords from the JD
 3. **The CV is always in English**, whatever the JD language (`output-guards.mjs`
