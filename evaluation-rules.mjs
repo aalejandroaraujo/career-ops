@@ -197,6 +197,118 @@ export function languageGap(record, profile) {
   return { gap: 'soft', language: lang, required: req?.level || null, candidate: cand, evidence: req?.evidence || null };
 }
 
+// ── domain / industries ──────────────────────────────────────────────────────
+
+/** Industry keys in profile.yml `industries:` and the words that name them in a gap. */
+export const INDUSTRY_WORDS = {
+  financial_services: /\b(financial[- ]services?|finance|fintech|bank(?:ing)?|insurance|insurer|versicherung\w*|asset management|wealth|pension|reinsurance)\b/i,
+  energy_utilities: /\b(energy|utilit(?:y|ies)|grid|power (?:sector|industry)|oil|gas|transmission|energie\w*)\b/i,
+  telecom: /\b(telecom\w*|telco|carrier|mobile operator|isp|telekom\w*)\b/i,
+  healthtech: /\b(health\w*|medical|medtech|hospital|clinical|pharma\w*|life sciences|gesundheit\w*)\b/i,
+  public_sector: /\b(public[- ]sector|government|federal|cantonal|canton|municipal\w*|verwaltung|öffentlich\w*|kanton\w*)\b/i,
+  transport: /\b(transport\w*|rail\w*|bahn\w*|logistics|mobility|aviation)\b/i,
+  retail: /\b(retail|e-?commerce|consumer goods)\b/i,
+  manufacturing: /\b(manufactur\w*|industrial|industrie\w*)\b/i,
+  education: /\b(education|edtech|universit\w*|school)\b/i,
+};
+
+const DOMAIN_GAP = /\b(no|without|lacks?|missing|absent|not)\b[^.;\n]{0,60}\b(domain|industry|sector|background|experience)\b|\b(domain|industry|sector) gap\b/i;
+
+/**
+ * Industries the candidate has evidence in, from profile.yml `industries:`
+ * ({key: [named customers or employers]}). Empty lists do not count.
+ * @returns {Record<string, string[]>}
+ */
+export function profileIndustries(profile) {
+  const raw = profile?.industries || {};
+  /** @type {Record<string, string[]>} */
+  const out = {};
+  for (const [k, v] of Object.entries(raw)) {
+    const list = Array.isArray(v) ? v : Array.isArray(v?.customers) ? v.customers : [];
+    if (list.length) out[k] = list.map(String);
+  }
+  return out;
+}
+
+/** The industry a gap sentence claims is missing, when it is a domain gap. */
+export function domainGapIndustry(gap) {
+  if (!DOMAIN_GAP.test(gap)) return null;
+  for (const [key, re] of Object.entries(INDUSTRY_WORDS)) if (re.test(gap)) return key;
+  return null;
+}
+
+// ── total compensation ───────────────────────────────────────────────────────
+
+/** BVG coordination deduction (CHF) and age-band retirement credit (share of insured salary). */
+export const BVG = { coordination: 26460, credit: (age) => (age >= 55 ? 0.18 : age >= 45 ? 0.15 : age >= 35 ? 0.10 : 0.07) };
+export const DEFAULT_BONUS_SHARE = 0.08;
+
+const kchf = (s) => {
+  const m = String(s || '').replace(/['’\s]/g, '').match(/(\d{2,3})(?:[.,](\d))?\s*K?/i);
+  if (!m) return null;
+  const n = Number(`${m[1]}${m[2] ? `.${m[2]}` : ''}`);
+  return n < 1000 ? n * 1000 : n;
+};
+
+/** Target band from profile.yml compensation.target_range ("CHF 150K–230K total ..."). */
+export function targetBand(profile) {
+  const raw = String(profile?.compensation?.target_range || '');
+  const m = raw.match(/(\d{2,3}(?:[.,]\d)?)\s*K?\s*[–—-]\s*(\d{2,3}(?:[.,]\d)?)\s*K/i);
+  return m ? { min: kchf(m[1]), max: kchf(m[2]), basis: /total/i.test(raw) ? 'total' : 'base' } : null;
+}
+
+/**
+ * Total compensation estimate: base + bonus + employer pension contribution
+ * above the 50% legal split. Every number that is not in the JD is an
+ * assumption and is listed as one.
+ *
+ * @param {{min:number, max:number}} base CHF, annual, 100%
+ * @param {{bonus?:string|null, pension_employer_share?:number|string|null, vacation_days?:number|null, mobile_office?:string|null}} benefits
+ * @param {{age?:number|null}} [opts]
+ */
+export function totalComp(base, benefits = {}, opts = {}) {
+  const assumptions = [];
+  const age = opts.age ?? null;
+  let bonusShare = 0;
+  if (benefits.bonus) {
+    const pct = String(benefits.bonus).match(/(\d{1,2})\s*%/);
+    bonusShare = pct ? Number(pct[1]) / 100 : DEFAULT_BONUS_SHARE;
+    if (!pct) assumptions.push(`bonus stated without a figure; assumed ${Math.round(DEFAULT_BONUS_SHARE * 100)}% of base`);
+  }
+  let share = null;
+  if (typeof benefits.pension_employer_share === 'number') share = benefits.pension_employer_share / 100;
+  else if (benefits.pension_employer_share === 'above_legal_unquantified') { share = 0.6; assumptions.push('pension described as above the legal minimum without a figure; assumed 60% employer share'); }
+  const credit = BVG.credit(age ?? 50);
+  if (age === null) assumptions.push('candidate age unknown; BVG credit for age 45-54 (15%) assumed');
+  const pensionDelta = (b) => (share !== null && share > 0.5 ? (share - 0.5) * credit * Math.max(0, b - BVG.coordination) : 0);
+  if (share !== null && share > 0.5) assumptions.push(`pension delta = (${Math.round(share * 100)}% − 50%) × ${Math.round(credit * 100)}% credit × (base − CHF ${BVG.coordination} coordination deduction)`);
+  const tot = (b) => Math.round(b * (1 + bonusShare) + pensionDelta(b));
+  return {
+    base: { min: base.min, max: base.max },
+    bonus_estimate: { min: Math.round(base.min * bonusShare), max: Math.round(base.max * bonusShare) },
+    pension_delta: { min: Math.round(pensionDelta(base.min)), max: Math.round(pensionDelta(base.max)) },
+    total: { min: tot(base.min), max: tot(base.max) },
+    vacation_days: benefits.vacation_days ?? null,
+    mobile_office: benefits.mobile_office ? 'yes' : 'not stated',
+    assumptions,
+  };
+}
+
+/**
+ * Comp dimension from TOTAL compensation against the target band. Base alone
+ * is never the sole basis.
+ */
+export function compScoreFromTotal(total, band) {
+  if (!total || !band) return null;
+  const mid = (total.min + total.max) / 2;
+  if (mid >= band.max) return 5;
+  if (mid >= (band.min + band.max) / 2) return 4.5;
+  if (mid >= band.min) return 3.5;
+  if (mid >= band.min * 0.9) return 2.5;
+  if (mid >= band.min * 0.8) return 2;
+  return 1.5;
+}
+
 // ── next_action ──────────────────────────────────────────────────────────────
 
 /**
@@ -341,6 +453,33 @@ export function enforceReport(md, ctx = {}) {
       corrections.push(`language hard stop added: JD requires ${lg.required}, candidate ${lg.candidate}`);
     }
     summary.language_gap = lg.gap;
+  }
+
+  // Domain gaps: consult profile.yml industries before declaring one.
+  const industries = profileIndustries(profile);
+  for (const list of [hardStops, softGaps]) {
+    for (const g of [...list]) {
+      const key = domainGapIndustry(String(g));
+      if (key && industries[key]) {
+        list.splice(list.indexOf(g), 1);
+        corrections.push(`domain gap removed: profile.yml industries.${key} lists ${industries[key].slice(0, 3).join(', ')}`);
+      }
+    }
+  }
+
+  // Comp on TOTAL compensation (base + bonus + pension delta), never base alone.
+  const comp = summary.comp || {};
+  const baseMin = num(comp.base_min); const baseMax = num(comp.base_max) ?? baseMin;
+  if (baseMin !== null) {
+    const birth = num(profile?.candidate?.birthyear);
+    const tc = totalComp({ min: baseMin, max: baseMax }, record?.benefits || comp.benefits || {}, { age: birth ? new Date().getFullYear() - birth : null });
+    const band = targetBand(profile);
+    const derived = compScoreFromTotal(tc.total, band);
+    summary.comp = { ...comp, base_min: baseMin, base_max: baseMax, total_min: tc.total.min, total_max: tc.total.max, bonus_estimate: tc.bonus_estimate, pension_delta: tc.pension_delta, mobile_office: tc.mobile_office, assumptions: tc.assumptions, ...(band ? { target_min: band.min, target_max: band.max } : {}) };
+    if (derived !== null && num(scores.comp) !== derived) {
+      corrections.push(`comp ${scores.comp ?? 'n/a'} → ${derived} (scored on total comp CHF ${Math.round(tc.total.min / 1000)}-${Math.round(tc.total.max / 1000)}K vs target ${band ? `${band.min / 1000}-${band.max / 1000}K` : 'n/a'}, not base alone)`);
+      scores.comp = derived;
+    }
   }
 
   const level = summary.level || {};

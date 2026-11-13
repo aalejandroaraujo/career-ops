@@ -42,7 +42,8 @@
 
 5. **Versions**:
    - EN (default)
-   - ES (if Spanish company)
+   - The JD language when it is not English (DE/FR/IT/ES), at the candidate's stated level, Swiss spelling ("ss") for Swiss companies; see `_shared.md` → Language Rules
+   - For a direct-hire application: the note goes AFTER applying via the ATS and never asks to confirm salary band or working language (those are first-call questions)
 
 6. **Alternative targets** with justification for why they are good second choices
 

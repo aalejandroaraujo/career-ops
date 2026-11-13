@@ -18,6 +18,7 @@
  * caller passes plain text and never needs to escape.
  */
 
+import { checkCvPayload } from './output-guards.mjs';
 import { readFile, writeFile, stat, copyFile, mkdir } from 'fs/promises';
 import { existsSync, readFileSync } from 'fs';
 import { resolve, dirname, basename, extname, join } from 'path';
@@ -318,6 +319,15 @@ async function main() {
   let payload;
   try { payload = JSON.parse(await readFile(absInput, 'utf-8')); }
   catch (err) { console.error(`Failed to parse input JSON: ${err.message}`); process.exit(1); }
+
+  // Truthful titles, guarded facts and CV language are checked BEFORE anything
+  // is rendered: a CV that renames a role or names a guarded client must never
+  // reach output/. See output-guards.mjs.
+  const guardErrors = checkCvPayload(payload);
+  if (guardErrors.length) {
+    console.error(`CV payload rejected by output guards:\n${guardErrors.map((e) => `  ✗ ${e}`).join('\n')}`);
+    process.exit(1);
+  }
 
   try {
     const report = await render(payload, resolve(outputPath));

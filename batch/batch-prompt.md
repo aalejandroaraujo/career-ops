@@ -146,7 +146,7 @@ Turn "builder" into a professional signal, not a "hobby maker". The framing chan
 
 #### Block A — Role Summary
 
-Table with: Detected archetype, Domain, Function, Seniority, Remote, Team size, TL;DR.
+Table with: Detected archetype, Domain, Function, Seniority, Remote, Team size, Employment type + channel (from the JD record), **Mobile office stated: yes/no** (from `benefits.mobile_office`), TL;DR.
 
 #### Block B — CV Match
 
@@ -160,8 +160,13 @@ Read `cv.md`. Table with each JD requirement mapped to exact CV lines or i18n.ts
 - Agentic → prioritize multi-agent, HITL, orchestration
 - Transformation → prioritize change management, adoption, scaling
 
+**Domain gaps:** before declaring a domain/industry gap ("no financial-services
+domain"), read `config/profile.yml` → `industries` (named customers per industry).
+If the industry is listed there, it is NOT a gap: cite the named customers instead.
+`evaluation-rules.mjs` removes a domain gap that contradicts `industries`.
+
 **Gaps** section with a mitigation strategy for each one:
-1. Is it a hard blocker or a nice-to-have?
+1. Is it a hard blocker or a nice-to-have? (A `nice_to_have` item in the JD record is never a hard blocker.)
 2. Can the candidate demonstrate adjacent experience?
 3. Is there a portfolio project that covers this gap?
 4. Concrete mitigation plan
@@ -180,7 +185,17 @@ Read `cv.md`. Table with each JD requirement mapped to exact CV lines or i18n.ts
 
 Use WebSearch for current salaries (Glassdoor, Levels.fyi, Blind), the company's comp reputation, demand trend. Table with data and cited sources. If there is no data, say so.
 
-Comp score (1-5): 5=top quartile, 4=above market, 3=median, 2=slightly below, 1=well below.
+**Compare on TOTAL compensation, never base alone.** Estimate the base band (CHF,
+100%, annual) and put it in the Machine Summary `comp:` block (`base_min`,
+`base_max`, `base_source`). `evaluation-rules.mjs` adds bonus (from the JD
+record `benefits.bonus`), the employer pension contribution above the 50% legal
+split (`benefits.pension_employer_share`) and states every assumption, then
+scores Comp on total comp against `config/profile.yml` `compensation.target_range`.
+In this block show a table with **Base** and **Total** on separate rows, plus
+vacation days and "Mobile office stated: yes/no". A base-only comparison row may
+stay in the table, but never as the sole basis for the comp score.
+
+Comp score (1-5) on total comp vs the target band: 5 = at/above the top of the band, 4.5 = upper half, 3.5 = lower half, 2.5 = within 10% below the floor, 2 = within 20% below, 1.5 = further below.
 
 #### Block E — Tailoring Plan
 
@@ -279,6 +294,10 @@ scores:
   comp: {X.X}
   culture: {X.X}
   risk: {X.X}
+comp:
+  base_min: {CHF, 100%, annual}
+  base_max: {CHF}
+  base_source: "{where the band estimate comes from}"
 legitimacy_tier: "{High Confidence | Proceed with Caution | Suspicious}"
 archetype: "{detectado}"
 employment_type: "{from the JD record}"
@@ -436,7 +455,13 @@ The orchestrator runs the same command again after you exit; it is idempotent.
 
 1. Read `cv.md` + `config/profile.yml`
 2. Extract 15-20 keywords from the JD
-3. Detect the JD language → CV language (EN default)
+3. **The CV is always in English**, whatever the JD language (`output-guards.mjs`
+   rejects a non-English CV). The cover letter and the recruiter note follow the
+   JD language: short, consistent with the candidate's stated level (German: "B1,
+   B2 in progress", stated ONCE, explicitly, using `cover_letter.language_learning[].sentence`
+   from profile.yml), Swiss spelling for Swiss employers ("ss", never "ß"; set
+   `"locale": "de-CH"` in the cover-letter payload). Never write a CV or letter
+   that implies a level above the stated one.
 4. Detect the archetype → adapt the framing
 5. **Write the `summary` (About Me) as POSITIONING, not as an inventory.**
 
@@ -518,7 +543,22 @@ The orchestrator runs the same command again after you exit; it is idempotent.
    Also apply the exit narrative from `modes/_profile.md` and any rule in
    `modes/_custom.md` (§Output Preferences); those take precedence over the above.
 6. Select the top 3-4 most relevant projects/roles
-7. Reorder experience bullets by relevance to the JD
+7. Reorder experience bullets by relevance to the JD.
+   **Production evidence first:** when the JD record's responsibilities or
+   requirements contain production/operations wording (produktiv, in Produktion,
+   betreibst, Betrieb, operate, run, ship, go-live, in production), rank evidence
+   of things *shipped to and run in production* ABOVE evaluation, benchmark or demo
+   metrics: in the About block's proof sentence, in Key Achievements (first item),
+   and in the first bullet of each role.
+   **Truthful titles:** `experience[].role` and `previous_experience[].role` are
+   copied from cv.md unchanged (the bold line under each employer). Never rename a
+   role to match JD keywords. Consecutive roles at one employer may share an entry
+   as "Title A, then Title B" only with both titles verbatim. Only the `tagline`
+   may mirror the JD title. `build-cv-altacv.mjs` rejects a payload that breaks this.
+   **Guarded facts:** `config/profile.yml` → `canonical_facts[]` lists facts with a
+   `guard` (`never_name_client`: use `say_instead`, never the client name;
+   `never_say_not_launched`: never describe the product as unlaunched/pre-launch;
+   `forbid`: listed strings never appear). The builders reject guarded strings.
 8. Build `skill_tags` (6-8 keyword phrases, grouped into rows)
 9. Inject keywords into existing achievements (**NEVER invent**)
 10. Write the JSON payload to `/tmp/cv-{candidate}-{company-slug}.json` using **this**
@@ -528,7 +568,7 @@ The orchestrator runs the same command again after you exit; it is idempotent.
 ```json
 {
   "name": "<config/profile.yml full_name>",
-  "tagline": "<target title, e.g. the role from the JD>",
+  "tagline": "<target title — may mirror the JD title exactly>",
   "personal": {
     "phone": "...", "email": "...", "location": "...",
     "linkedin": "<handle, no URL>", "github": "<handle>",
@@ -729,6 +769,6 @@ If something fails:
 2. Detect the role's archetype and adapt the framing
 3. Cite exact CV lines when there is a match
 4. Use WebSearch for comp and company data
-5. Generate content in the JD's language (EN default)
+5. CV in English always; cover letter, recruiter notes and first-call script in the JD's language (EN default), at the candidate's stated level
 6. Be direct and actionable — no fluff
 7. When you generate English text (PDF summaries, bullets, STAR stories), use native tech English: short sentences, action verbs, no unnecessary passive voice, no "in order to" or "utilized"

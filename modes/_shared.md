@@ -44,6 +44,19 @@ Two scores, never one blended number:
 - `evaluation-rules.mjs enforce <report> --record <jd-record> --write` recomputes fit, deal, decision, priority and `next_action` from the dimension scores and the canonical JD record. Every evaluation path runs it. Plain-language policy: `docs/evaluation-rules.md`.
 - Ethical-use gate: below fit 4.0, recommend against applying unless the user has a specific reason (see AGENTS.md).
 
+## Language Rules (non-English JDs)
+
+- The **CV stays in English** for every JD. Never generate a CV in a language above the candidate's stated level.
+- **Cover letter, recruiter/LinkedIn notes and the first-call script** follow the JD language: short, consistent with the stated level (read `config/profile.yml` → `cover_letter.language_learning`; state the level once, explicitly), Swiss spelling for Swiss employers ("ss", never "ß"; cover-letter payload `"locale": "de-CH"`).
+- The language gap is a **soft gap with mitigation** unless the JD states a mandatory level above the candidate's (e.g. "Deutsch C1 zwingend"), which is a hard stop. A German-language JD or "gute Deutschkenntnisse" without a level is not a hard stop.
+
+## Evidence and Titles
+
+- When the JD mentions production/operations (produktiv, betreibst, operate, run, ship, go-live), rank shipped-to-production evidence above evaluation or demo metrics in the About block, Key Achievements and each role's first bullet.
+- Experience role titles come from `cv.md` unchanged; only the tagline may mirror the JD title.
+- Facts in `config/profile.yml` → `canonical_facts[]` carry usage guards (`never_name_client`, `never_say_not_launched`, `forbid`). `output-guards.mjs` enforces them in every generated CV and cover letter.
+- Domain gaps: check `config/profile.yml` → `industries` before declaring one.
+
 ## Posting Legitimacy (Block G)
 
 Block G assesses whether a posting is likely a real, active opening. It does NOT affect fit or deal -- it is a separate qualitative assessment.

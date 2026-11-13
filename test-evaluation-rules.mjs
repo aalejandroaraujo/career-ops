@@ -8,6 +8,7 @@
  */
 
 import {
+  BVG, compScoreFromTotal, domainGapIndustry, profileIndustries, targetBand, totalComp,
   THRESHOLDS, candidateLanguageLevel, decide, dealScore, enforceReport, fitScore, isForbiddenNextAction,
   languageGap, levelGap, levelRank, nextActionPlan, patchTsv, priorityOf, readSummary, requiredLanguageLevel,
 } from './evaluation-rules.mjs';
@@ -144,6 +145,35 @@ console.log('\n6. Tracker line');
 eq(patchTsv('7\t2026-11-13\tAcme\tPlatform Engineer AI\tEvaluated\t3.4/5\t✅\t[441](reports/441-acme-2026-11-13.md)\tCONSIDER — strong fit\n', { fit: 4.5, decision: 'apply', priority: 'medium' }),
   '7\t2026-11-13\tAcme\tPlatform Engineer AI\tEvaluated\t4.5/5\t✅\t[441](reports/441-acme-2026-11-13.md)\tAPPLY MEDIUM — strong fit\n', 'score = fit, notes tagged with decision + priority');
 eq(patchTsv('7\td\tA\tR\tEvaluated\t2.1/5\t❌\t[1](r)\tweak\n', { fit: 2.1, decision: 'skip', priority: 'low' }).split('\t')[4], 'SKIP', 'skip decision → SKIP status');
+
+console.log('\n7. Industries and domain gaps');
+const indProfile = { ...profile, industries: { financial_services: ['Example Insurance AG', 'Example Bank'], energy_utilities: [], telecom: { customers: ['Example Telco'] } } };
+eq(Object.keys(profileIndustries(indProfile)), ['financial_services', 'telecom'], 'industries with named customers count; empty lists do not');
+eq(domainGapIndustry('No financial-services domain experience in cv.md'), 'financial_services', 'domain gap sentence → industry key');
+eq(domainGapIndustry('No insurance industry background'), 'financial_services', 'insurance maps to financial_services');
+eq(domainGapIndustry('German B1 against a German JD'), null, 'non-domain gap → null');
+const domReport = report.replace('  - "German B1 against a German JD"', '  - "German B1 against a German JD"\n  - "No financial-services domain experience"');
+const dom = enforceReport(domReport, { record: directHire, profile: indProfile });
+ok(!readSummary(dom.md).soft_gaps.some((g) => /financial-services domain/.test(g)), 'domain gap removed when profile.industries lists the industry');
+ok(dom.result.corrections.some((c) => /industries\.financial_services/.test(c)), 'removal recorded as a correction');
+
+console.log('\n8. Total compensation');
+const tc = totalComp({ min: 115000, max: 135000 }, { bonus: 'Leistungsabhängiger Bonus', pension_employer_share: 60, vacation_days: 25, mobile_office: 'Mobile Office' }, { age: 50 });
+eq(tc.bonus_estimate, { min: 9200, max: 10800 }, 'unquantified bonus assumed at 8% of base');
+eq(tc.pension_delta.min, Math.round(0.1 * 0.15 * (115000 - BVG.coordination)), 'pension delta = (60%-50%) × 15% × (base − coordination)');
+eq(tc.total, { min: 115000 + 9200 + tc.pension_delta.min, max: 135000 + 10800 + tc.pension_delta.max }, 'total = base + bonus + pension delta');
+eq(tc.mobile_office, 'yes', 'mobile office stated');
+eq(tc.assumptions.length, 2, 'every inferred number is listed as an assumption');
+eq(totalComp({ min: 100000, max: 100000 }, {}, { age: 40 }).total, { min: 100000, max: 100000 }, 'no benefits → total = base');
+eq(targetBand({ compensation: { target_range: 'CHF 150K–230K total (FTE)' } }), { min: 150000, max: 230000, basis: 'total' }, 'target band parsed from profile');
+const band = { min: 150000, max: 230000 };
+eq([compScoreFromTotal({ min: 240000, max: 260000 }, band), compScoreFromTotal({ min: 195000, max: 215000 }, band), compScoreFromTotal({ min: 150000, max: 170000 }, band), compScoreFromTotal({ min: 130000, max: 145000 }, band)], [5, 4.5, 3.5, 2.5], 'comp scored on total vs band');
+const compReport = report.replace('next_action:', 'comp:\n  base_min: 115000\n  base_max: 135000\nnext_action:').replace('| Comp | 2.5/5 |', '| Comp | 3.5/5 |');
+const ce = enforceReport(compReport, { record: { ...directHire, benefits: { bonus: 'Bonus', pension_employer_share: 60 } }, profile: { ...profile, compensation: { target_range: 'CHF 150K–230K total (FTE)' }, candidate: { ...profile.candidate, birthyear: 1976 } } });
+const cs = readSummary(ce.md);
+ok(cs.comp.total_min > cs.comp.base_min && cs.comp.target_min === 150000, 'summary carries base and total separately, with the target band');
+ok(ce.result.corrections.some((c) => /scored on total comp/.test(c)), 'comp dimension re-scored on total, not base');
+eq(ce.result.decision, 'apply', 'comp never changes the decision');
 
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);
