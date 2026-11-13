@@ -31,7 +31,7 @@
 
 import { readFileSync, existsSync, readdirSync, statSync } from 'fs';
 import { resolve, dirname, join } from 'path';
-import { fileURLToPath } from 'url';
+import { fileURLToPath, pathToFileURL } from 'url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PROFILE = resolve(__dirname, 'config', 'profile.yml');
@@ -77,9 +77,19 @@ function newestTex() {
  * after the script name. A leading `cd <dir> &&` changes what a relative path
  * means, so honor it; otherwise resolve against the project root.
  */
-function texFromCommand(command) {
-  if (typeof command !== 'string' || !command.includes('build-cv-altacv.mjs')) return null;
-  const after = command.slice(command.indexOf('build-cv-altacv.mjs'));
+// An actual invocation (`node [path/]build-cv-altacv.mjs ...`), not any command
+// that merely mentions the builder — a commit message or a grep naming it used
+// to trigger the guard against an unrelated file.
+const BUILD_INVOCATION = /(?:^|[\s;&|(])node\s+(?:["']?[^\s"';|&]*\/)?build-cv-altacv\.mjs["']?\s/;
+
+export function isBuildCommand(command) {
+  return typeof command === 'string' && BUILD_INVOCATION.test(command);
+}
+
+export function texFromCommand(command) {
+  if (!isBuildCommand(command)) return null;
+  const at = command.search(BUILD_INVOCATION);
+  const after = command.slice(command.indexOf('build-cv-altacv.mjs', at));
   // Strip surrounding quotes; stop at shell separators so we don't cross into a
   // chained command that happens to mention another .tex.
   const segment = after.split(/&&|\|\||;|\|/)[0];
@@ -112,7 +122,7 @@ function main() {
       process.exit(0);
     }
     const command = payload?.tool_input?.command;
-    if (typeof command !== 'string' || !command.includes('build-cv-altacv.mjs')) process.exit(0);
+    if (!isBuildCommand(command)) process.exit(0);
     texPath = texFromCommand(command);
     // Only fall back to mtime when the command didn't name its output.
     if (!texPath) texPath = newestTex();
@@ -151,4 +161,5 @@ function main() {
   process.exit(0);
 }
 
-main();
+// Run only as a CLI/hook, so tests can import isBuildCommand / texFromCommand.
+if (import.meta.url === pathToFileURL(process.argv[1] || '').href) main();
