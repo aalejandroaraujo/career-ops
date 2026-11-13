@@ -185,6 +185,7 @@ const USER_PATHS = [
   'output/',
   'jds/',
   'writing-samples/',
+  'calibration/',
 ];
 
 function parseVersionFile(raw) {
