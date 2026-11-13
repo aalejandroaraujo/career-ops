@@ -77,7 +77,7 @@ async function main() {
   // Sequential — project rule: never Playwright in parallel
   for (let i = 0; i < urls.length; i++) {
     const url = urls[i];
-    let result, reason, usedBrowser = false;
+    let result, reason, matched = null, usedBrowser = false;
 
     // Rung 1: zero-token ATS check (Greenhouse/Lever JSON API, Phenom embedded DDO).
     // A conclusive active/expired wins; otherwise fall through.
@@ -89,13 +89,15 @@ async function main() {
       // Rung 2: Playwright — handles non-ATS pages and inconclusive API results.
       await ensureBrowser();
       const getHeadedPage = headed ? () => headed.get() : undefined;
-      ({ result, reason } = await checkUrlLivenessWithFallback(page, url, { getHeadedPage }));
+      ({ result, reason, matched = null } = await checkUrlLivenessWithFallback(page, url, { getHeadedPage }));
       usedBrowser = true;
     }
 
     const icon = { active: '✅', expired: '❌', uncertain: '⚠️' }[result];
     console.log(`${icon} ${result.padEnd(10)} ${api ? '(api) ' : '      '}${url}`);
     if (result !== 'active') console.log(`           ${reason}`);
+    // Say which control or text made the call, so a wrong verdict is debuggable.
+    if (matched) console.log(`           matched via ${matched.via}: ${matched.selector || 'page text'} "${matched.label || ''}"${matched.href ? ` → ${matched.href}` : ''}`);
     if (result === 'active') active++;
     else if (result === 'expired') expired++;
     else uncertain++;

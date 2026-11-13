@@ -140,14 +140,25 @@ export async function checkUrlLiveness(page, url, { extraSettleMs = 0 } = {}) {
 
     const finalUrl = page.url();
     const bodyText = await page.evaluate(() => document.body?.innerText ?? '');
+    // Apply controls with enough context to say WHY one counted: careers sites
+    // (Swiss Life, prospective.ch, refline) render "Jetzt bewerben" as an anchor
+    // styled as a button, often in a sticky header/footer bar, pointing at an
+    // off-domain ATS form. Those used to be dropped by the chrome filter, so a
+    // live posting came back `uncertain`. Chrome controls are now kept and
+    // flagged; the classifier accepts them when button-styled or off-domain.
     const applyControls = await page.evaluate(() => {
       const candidates = Array.from(
         document.querySelectorAll('a, button, input[type="submit"], input[type="button"], [role="button"]')
       );
+      const describe = (el) => {
+        const id = el.id ? `#${el.id}` : '';
+        const cls = typeof el.className === 'string' && el.className.trim()
+          ? `.${el.className.trim().split(/\s+/).slice(0, 3).join('.')}` : '';
+        return `${el.tagName.toLowerCase()}${id}${cls}`;
+      };
 
       return candidates
         .filter((element) => {
-          if (element.closest('nav, header, footer')) return false;
           if (element.closest('[aria-hidden="true"]')) return false;
 
           const style = window.getComputedStyle(element);
@@ -167,10 +178,23 @@ export async function checkUrlLiveness(page, url, { extraSettleMs = 0 } = {}) {
             .join(' ')
             .replace(/\s+/g, ' ')
             .trim();
-
-          return label;
+          const href = element.tagName === 'A' ? element.href || '' : '';
+          let offDomain = false;
+          try { offDomain = !!href && new URL(href).hostname.replace(/^www\./, '') !== location.hostname.replace(/^www\./, ''); } catch {}
+          const style = window.getComputedStyle(element);
+          const buttonStyled = element.tagName !== 'A'
+            || /\b(btn|button|cta|apply)\b/i.test(`${element.className} ${element.getAttribute('role') || ''}`)
+            || (style.backgroundColor && !/rgba\(0, 0, 0, 0\)|transparent/.test(style.backgroundColor));
+          return {
+            label,
+            href,
+            offDomain,
+            buttonStyled: !!buttonStyled,
+            inChrome: !!element.closest('nav, header, footer'),
+            selector: describe(element),
+          };
         })
-        .filter(Boolean);
+        .filter((control) => control.label);
     });
 
     const classified = classifyLiveness({ status, finalUrl, bodyText, applyControls });
