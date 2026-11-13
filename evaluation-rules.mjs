@@ -482,6 +482,11 @@ export function enforceReport(md, ctx = {}) {
     }
   }
 
+  // A gap entry that says it does not apply is not a gap.
+  for (const g of [...softGaps]) {
+    if (/\b(not applicable|does not apply|n\/a)\b/i.test(String(g))) { softGaps.splice(softGaps.indexOf(g), 1); corrections.push(`non-gap removed from soft_gaps: ${String(g).slice(0, 60)}`); }
+  }
+
   const level = summary.level || {};
   const lgap = levelGap(level.detected, level.candidate || profile?.candidate?.level);
   if (lgap.overqualified && !softGaps.some((g) => /overqualif/i.test(g))) {

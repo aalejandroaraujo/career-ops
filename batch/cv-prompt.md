@@ -27,7 +27,7 @@ You build ONE tailored CV PDF for a job offer that has **already been evaluated*
 1. Read `batch/batch-prompt.md`, section **"Paso 4 — Generate PDF"**, and follow its steps 1–13 exactly. That covers the About Me positioning rules, the AltaCV JSON schema, the `{candidate}` slug rule, the two build commands and the PDF verification. **Ignore its Gate:** this CV is generated whatever the score.
    - `{company-slug}` = the company from the report's Machine Summary, slugified the same way the report filename is.
    - Output paths: `output/cv-{candidate}-{company-slug}-{{DATE}}.tex` and `.pdf`.
-2. Verify the PDF exists and is non-empty (`generate-latex.mjs` → `"compiled": true`, and the file on disk). A valid `.tex` is not a PDF. `"verified": false` is a failed build: follow the retry rule in Paso 4 step 12 of `batch/batch-prompt.md`.
+2. Always rebuild, even if a PDF with the same name exists (it may predate the current guards). Verify the PDF exists and is non-empty (`generate-latex.mjs` → `"compiled": true`, and the file on disk). A valid `.tex` is not a PDF. `"verified": false` is a failed build: follow the retry rule in Paso 4 step 12 of `batch/batch-prompt.md`.
 3. Only if the PDF exists: in `{{REPORT_FILE}}`, replace the value of the `**PDF:**` header line with the PDF path (e.g. `**PDF:** output/cv-…-{{DATE}}.pdf`). Change nothing else in the report.
 4. Print the final JSON (the orchestrator parses it; `pdf` must be the project-relative path you verified):
 

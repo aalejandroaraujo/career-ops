@@ -127,6 +127,7 @@ export function runCase(c) {
     const text = JSON.stringify(payload);
     for (const s of exp.cv_required || []) add(new RegExp(s, 'i').test(text), `CV contains /${s}/`);
     for (const s of exp.cv_forbidden || []) add(!new RegExp(s, 'i').test(text), `CV does not contain /${s}/`);
+    for (const s of exp.cv_summary_required || []) add(new RegExp(s, 'i').test(String(payload.summary || '')), `CV About block matches /${s}/`);
     if (exp.cv_first_achievement) add(new RegExp(exp.cv_first_achievement, 'i').test(JSON.stringify(payload.achievements?.[0] || {})), `first Key Achievement matches /${exp.cv_first_achievement}/`);
   }
 

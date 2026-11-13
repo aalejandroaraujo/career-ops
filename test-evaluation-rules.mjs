@@ -175,5 +175,9 @@ ok(cs.comp.total_min > cs.comp.base_min && cs.comp.target_min === 150000, 'summa
 ok(ce.result.corrections.some((c) => /scored on total comp/.test(c)), 'comp dimension re-scored on total, not base');
 eq(ce.result.decision, 'apply', 'comp never changes the decision');
 
+console.log('\n9. Non-gaps');
+const ng = enforceReport(report.replace('  - "German B1 against a German JD"', '  - "German B1 against a German JD"\n  - "Overqualified / age-band read: not applicable here"'), { record: directHire, profile: { ...profile, candidate: { level: 'Engineer' } } });
+ok(!readSummary(ng.md).soft_gaps.some((g) => /not applicable/.test(g)), 'a soft gap that says "not applicable" is removed');
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);
