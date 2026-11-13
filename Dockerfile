@@ -22,7 +22,10 @@ RUN set -eux; \
     # latex-extra, so without this the AltaCV compile dies with
     # "! LaTeX Error: File `fontawesome5.sty' not found." and produces no PDF at all.
     # It is a large package (~1.2 GB installed) — that cost buys the LaTeX CV pipeline.
-    apt-get install -y --no-install-recommends ca-certificates curl git tini latexmk texlive-latex-recommended texlive-latex-extra texlive-fonts-recommended texlive-fonts-extra texlive-xetex; \
+    # poppler-utils + tesseract: jd-intake.mjs extracts filed PDFs (pdftotext,
+    # pdftoppm) and OCRs screenshots into the canonical JD record; pdfinfo backs
+    # the CV build verification. deu/fra/ita cover Swiss postings.
+    apt-get install -y --no-install-recommends ca-certificates curl git tini latexmk texlive-latex-recommended texlive-latex-extra texlive-fonts-recommended texlive-fonts-extra texlive-xetex poppler-utils tesseract-ocr tesseract-ocr-deu tesseract-ocr-fra tesseract-ocr-ita; \
     arch="$(dpkg --print-architecture)"; \
     case "$arch" in \
       amd64)  go_arch=amd64 ;; \

@@ -589,16 +589,40 @@ process_offer() {
   # cached file; otherwise fetch-jd.mjs (ATS API → headless Chromium render).
   # On failure leave $jd_file unwritten so the worker falls back to WebFetch
   # (batch-prompt "Paso 1") — no regression vs. the previous behaviour.
+  #
+  # Every JD then goes through jd-intake.mjs, which writes the canonical JD
+  # record ($jd_record) that the worker scores from, and replaces $jd_file with
+  # extracted plain text. A filed PDF/screenshot/.docx/.eml used to be copied
+  # byte-for-byte into the .txt the worker reads; intake extracts (pdftotext /
+  # OCR) instead, so every input form reaches the worker as the same record.
+  local jd_record="${jd_file%.txt}.json"
+  rm -f "$jd_record"
+  local intake_source="url"
+  [[ "$source" =~ (scout|scan) ]] && intake_source="batch"
   if [[ "$url" =~ ^local:jds/ ]]; then
-    if cp "$PROJECT_DIR/jds/${url#local:jds/}" "$jd_file" 2>>"$log_file"; then
-      echo "    📄 Using cached JD: ${url#local:jds/}"
+    local local_jd="$PROJECT_DIR/jds/${url#local:jds/}"
+    if [[ -f "$local_jd" ]]; then
+      local local_source=""
+      [[ "$notes" =~ (jd-text|paste) && "$local_jd" =~ \.(md|txt)$ ]] && local_source="--source paste"
+      # shellcheck disable=SC2086
+      if node "$PROJECT_DIR/jd-intake.mjs" "$local_jd" $local_source --out "$jd_record" --text-out "$jd_file" >>"$log_file" 2>&1; then
+        echo "    📄 Using cached JD: ${url#local:jds/} (canonical record written)"
+      else
+        echo "    ⚠️  Local JD unreadable or too thin: ${url#local:jds/} — worker will read the file itself"
+        rm -f "$jd_file" "$jd_record"
+      fi
     else
       echo "    ⚠️  Local JD not found: ${url#local:jds/}"
     fi
   elif node "$PROJECT_DIR/fetch-jd.mjs" "$url" --out "$jd_file" --pdf-dir "$PROJECT_DIR/jds" >>"$log_file" 2>&1; then
     echo "    📥 Pre-fetched JD ($(wc -c <"$jd_file" 2>/dev/null || echo 0) bytes)"
+    node "$PROJECT_DIR/jd-intake.mjs" "$jd_file" --source "$intake_source" --url "$url" --out "$jd_record" --text-out "$jd_file" >>"$log_file" 2>&1 \
+      || { echo "    ⚠️  JD intake failed — worker will build the record itself"; rm -f "$jd_record"; }
   else
-    echo "    ⚠️  JD pre-fetch failed — worker will WebFetch"
+    echo "    ⚠️  JD pre-fetch failed — worker will WebFetch and build the record itself"
+  fi
+  if [[ -s "$jd_record" ]]; then
+    prompt="$prompt JD record: $jd_record"
   fi
 
   # Prepare system prompt with placeholders resolved

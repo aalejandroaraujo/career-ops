@@ -16,6 +16,17 @@ If the input is a **URL** (not pasted JD text), follow this strategy to extract 
 
 **If the input is JD text** (not a URL): use directly, without needing to fetch.
 
+## Step 0.25 — Canonical JD record
+
+Whatever the input form (URL page text, pasted text, a PDF/.docx/.md/.txt file, a screenshot, a forwarded email), build the canonical JD record BEFORE any scoring and evaluate only from it:
+
+```bash
+# save pasted/fetched text first (e.g. jds/{date}_{slug}.md), or pass the file the user gave
+node jd-intake.mjs <file> [--source url|paste|file|screenshot|email|batch] [--url <url>] --out /tmp/jd-record.json
+```
+
+`jd-intake.mjs` extracts PDFs with pdftotext, screenshots with OCR, and .docx/.eml natively, so the same JD yields the same record (same `content_hash`) in every form. Use its `employment_type`, `channel`, `language`, `requirements[].level` (required vs nice_to_have), `benefits` and `contact` fields as given; a `nice_to_have` requirement is never a hard stop. If a field is visibly wrong, correct it and say so in one line under Block A.
+
 ## Step 0.5 — Liveness gate
 
 Before running any evaluation, confirm the posting is still live. The Step 0 Playwright snapshot already holds the evidence — judge it now, before spending tokens on the A-G evaluation, the report, or a PDF. A 404/expired page silently served as a static fallback ("position filled", empty shell) otherwise scores a full evaluation against phantom content.
