@@ -5692,6 +5692,7 @@ for (const suite of [
   'test-pipeline-store.mjs',
   'test-cv-request.mjs',
   'test-jd-intake.mjs',
+  'test-build-verify.mjs',
 ]) {
   const suitePath = join(ROOT, suite);
   if (!existsSync(suitePath)) { warn(`${suite} not found — skipped`); continue; }

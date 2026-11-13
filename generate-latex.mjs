@@ -23,6 +23,7 @@ import { resolve, basename, dirname, join } from 'path';
 import { execFileSync } from 'child_process';
 import { existsSync, mkdirSync } from 'fs';
 import { fileURLToPath } from 'url';
+import { verifyCvPdf } from './cv-verify.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 
@@ -101,10 +102,11 @@ function detectProfile(content) {
 const CJK_RE = /[぀-ヿ㐀-鿿豈-﫿ｦ-ﾟ가-힯ᄀ-ᇿ]/;
 
 async function main() {
-  const inputPath = process.argv[2];
-  const outputPath = process.argv[3]; // optional
+  const positional = process.argv.slice(2).filter((a) => !a.startsWith('--'));
+  const inputPath = positional[0];
+  const outputPath = positional[1]; // optional
   if (!inputPath) {
-    console.error('Usage: node generate-latex.mjs <input.tex> [output.pdf]');
+    console.error('Usage: node generate-latex.mjs <input.tex> [output.pdf] [--no-verify]');
     process.exit(1);
   }
 
@@ -306,6 +308,21 @@ async function main() {
     }
     if (engine === 'tectonic') {
       await rm(compilePath).catch(() => {});
+    }
+  }
+
+  // Build verification (AltaCV): metadata names the candidate, exactly 2 pages,
+  // no open "- Present" ranges, photo off the page edge. A failed check fails
+  // the build (exit 1, verified:false) — compiled-but-wrong is not a CV to send.
+  // Pass --no-verify only for a deliberately non-standard document.
+  if (report.compiled && report.pdf && profileId === 'altacv' && !process.argv.includes('--no-verify')) {
+    const v = verifyCvPdf(report.pdf.path, { texPath: absPath });
+    // null = no poppler tools, nothing could be checked (rebuild the container).
+    report.verified = v.skipped ? null : v.ok;
+    report.verification = v;
+    if (!v.ok) {
+      console.log(JSON.stringify(report, null, 2));
+      process.exit(1);
     }
   }
 

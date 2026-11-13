@@ -18,6 +18,11 @@
 
 \documentclass[10pt,a4paper,withhyper]{altacv}
 
+% PDF metadata: the candidate, not the toolchain. Without this, Creator and
+% Producer read "LaTeX with hyperref" / "pdfTeX-1.40" in the recruiter's viewer.
+% Filled from the payload name and tagline; cv-verify.mjs asserts it.
+\hypersetup{unicode,pdfauthor={{{PDF_AUTHOR}}},pdfcreator={{{PDF_AUTHOR}}},pdfproducer={{{PDF_AUTHOR}}},pdftitle={{{PDF_TITLE}}}}
+
 % Page layout
 \geometry{left=1cm,right=1cm,top=1.5cm,bottom=1.5cm,columnsep=1cm}
 
@@ -109,7 +114,10 @@
 \newlength{\photodrop}
 \setlength{\photodrop}{6mm}
 \renewcommand{\altacv@add@photo@right}[1]{%
-  \appto{\altacv@right@photos}{\raisebox{-\photodrop}{\@makeaphoto{\altacv@photo@diam@right}{#1}}\hspace{1.2cm}}%
+  % \hspace* (not \hspace): the photos are followed by \par, and TeX discards
+  % trailing glue at a paragraph end, so a plain \hspace left the photo flush on
+  % the 1cm page margin. cv-verify.mjs asserts the margin after every build.
+  \appto{\altacv@right@photos}{\raisebox{-\photodrop}{\@makeaphoto{\altacv@photo@diam@right}{#1}}\hspace*{1.2cm}}%
   \addtolength{\altacv@photos@width}{\altacv@photo@diam@right}%
   \addtolength{\altacv@photos@width}{1.2cm}%
 }

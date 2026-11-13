@@ -37,6 +37,12 @@ had been **referred** to it.
   explicit page text ("no longer accepting applications", "position filled").
 - With no definitive proof: **evaluate as normal**, put
   `**Verification:** unconfirmed (batch mode)` in the header, and carry on.
+- **An `uncertain` liveness result never lowers legitimacy confidence when the JD
+  text carries an apply string** (`apply_control_present: true` in the JD record:
+  "Jetzt bewerben", "Apply now", "Bewerben", "Postuler"). Record it as
+  "apply control present (text)" in Block G's verified facts and keep the tier
+  the other signals earn. `check-liveness.mjs` now reports which selector or text
+  matched; quote that line when you have it.
 - **Availability NEVER lowers the fit score.** The score measures candidate↔role
   fit. Doubts about availability belong in `**Legitimacy:**` and `next_action` —
   never in the score, and never as a `Discarded` status.
@@ -208,6 +214,8 @@ Analyze posting signals to assess whether this is a real, active opening.
 4. **Role market context** -- Qualitative assessment from JD content.
 
 **Output format:** Same as interactive mode (Assessment tier + Signals table + Context Notes), but with a note that posting freshness is unverified.
+
+**Apply control:** if the JD record says `apply_control_present: true`, the apply control is a verified fact even in batch mode; do not list it as "unverified (batch mode)" and do not let an `uncertain` liveness result pull the tier down.
 
 **Assessment:** Apply the same three tiers (High Confidence / Proceed with Caution / Suspicious), weighting available signals more heavily. If insufficient signals are available to make a determination, default to "Proceed with Caution" with a note about limited data.
 
@@ -480,7 +488,15 @@ node generate-latex.mjs \
     aborts without producing anything. If `compiled` is `false` or the file is not
     there, treat the PDF as not generated (`pdf_emoji` = `❌`, `"pdf": null`) and put
     the error in the notes.
-13. Report: .tex path, PDF path, file size, keyword coverage %
+    **Build verification:** for AltaCV the same JSON carries `"verified"`
+    (`cv-verify.mjs`: Author/Creator/Producer = candidate name, Title carries it,
+    exactly 2 pages, no "- Present" date range, photo ≥15mm from the right edge).
+    `false` exits non-zero: read `verification.errors`, fix the payload (3 pages →
+    cut the weakest bullet; 1 page → restore bullets; open range → end date; wrong
+    metadata → `name` must be `config/profile.yml` full_name), rebuild, at most 2
+    retries. Still `false` → PDF not generated (`❌`, error in notes). `null` = poppler
+    missing in the container; proceed and note "PDF unverified".
+13. Report: .tex path, PDF path, file size, keyword coverage %, verification result
 
 On success, in Paso 5 use `pdf_emoji` = `✅` and in Paso 6 set `"pdf"` to the output path.
 

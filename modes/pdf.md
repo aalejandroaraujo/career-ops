@@ -127,12 +127,21 @@ These match the scripts' own usage strings:
 - `"compiled": true|false` → **a valid `.tex` does not imply a PDF.** If a LaTeX
   package is missing the compiler aborts without producing a file. On `false`, read
   `compileError`.
+- `"verified": true|false|null` → **build verification** (AltaCV only, via
+  `cv-verify.mjs`): PDF Author/Creator/Producer equal the candidate name and the Title
+  carries it, exactly **2 pages**, no open date range ("… - Present"), and the photo sits
+  at least 15mm from the right page edge. On `false` the script exits non-zero; read
+  `verification.errors` and fix the PAYLOAD, then rebuild (max 2 retries):
+  3 pages → cut the weakest bullet or achievement detail; 1 page → restore the bullets
+  you cut; open date range → give the role an end date (never write "Present");
+  metadata → the payload `name` must be `config/profile.yml` `full_name`.
+  `null` means poppler-utils is missing (rebuild the container); nothing was checked.
 - Expect `engine: "pdflatex"` for AltaCV (deliberate — the tectonic/XeTeX branch needs
   Lato installed as a system font; pdflatex uses the bundled Type1 `lato`).
 - A healthy AltaCV PDF is **~2.5 MB** because of the embedded photo. A ~80 KB PDF means
   the photo was dropped or the classic template was used.
 
-If `compiled` is `false` or the file is not there, treat the PDF as not generated
+If `compiled` is `false`, `verified` is `false` after the retries, or the file is not there, treat the PDF as not generated
 (tracker `pdf_emoji` = `❌`) and put the error in the notes. Never report a path you
 have not confirmed exists.
 
