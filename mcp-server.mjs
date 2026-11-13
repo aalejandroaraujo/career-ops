@@ -15,7 +15,8 @@
  * boundary is the internal careerops-bridge network (no published host port).
  *
  * Transport: Streamable HTTP (stateful sessions) at POST/GET/DELETE /mcp.
- * Tools: evaluate_url, get_status, get_evaluation, evaluate_and_wait.
+ * Tools: evaluate_url, get_status, get_evaluation, evaluate_and_wait, generate_cv,
+ * plus the tracker tools and render_cv.
  *
  * Run: npm run mcp   (node mcp-server.mjs)
  */
@@ -27,6 +28,11 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
+import { execFile } from 'node:child_process';
+import { writeFile, readFile, stat, unlink } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const PORT = Number(process.env.CAREEROPS_MCP_PORT || 8766);
 const INGEST_BASE = (process.env.CAREEROPS_INGEST_BASE || 'http://career-ops:8765').replace(/\/+$/, '');
@@ -46,6 +52,46 @@ const STATUS_POLL_MS = Number(process.env.CAREEROPS_MCP_STATUS_POLL_MS || 3000);
 
 const log = (m) => console.log(`[mcp] ${new Date().toISOString()} ${m}`);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// ── CV rendering ──────────────────────────────────────────────────────────
+// The one tool that does not proxy to the ingest server. Rendering is a
+// stateless transform over the shared /app volume — no tracker state, nothing
+// for ingest-server.mjs to own — so it runs the same two scripts the pdf mode
+// documents, in-process, with a fixed argv (never a shell).
+const APP_DIR = dirname(fileURLToPath(import.meta.url));
+const RENDER_TIMEOUT_MS = Number(process.env.CAREEROPS_MCP_RENDER_TIMEOUT_MS || 300000);
+
+// A bad FontAwesome name aborts pdflatex with "Undefined control sequence" and
+// no PDF — a failure mode that costs a full render cycle to diagnose. Only
+// icons verified against the bundled fontawesome are allowed through; anything
+// else degrades to faGem rather than breaking the compile.
+const SAFE_ICONS = new Set([
+  'faGem', 'faChartLine', 'faHeart', 'faCertificate', 'faComments', 'faIdCard', 'faCircle',
+]);
+
+function slugify(text) {
+  return String(text || '')
+    .normalize('NFKD').replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase().replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '').slice(0, 60);
+}
+
+function run(cmd, args, opts = {}) {
+  return new Promise((resolve) => {
+    execFile(cmd, args, { cwd: APP_DIR, timeout: RENDER_TIMEOUT_MS, maxBuffer: 8 * 1024 * 1024, ...opts },
+      (err, stdout, stderr) => resolve({ ok: !err, code: err?.code ?? 0, stdout: String(stdout || ''), stderr: String(stderr || '') }));
+  });
+}
+
+async function candidateSlug() {
+  try {
+    const yml = await readFile(join(APP_DIR, 'config', 'profile.yml'), 'utf8');
+    const m = yml.match(/full_name:\s*"?([^"\n]+)"?/);
+    if (m) return slugify(m[1]);
+  } catch { /* fall through */ }
+  return 'candidate';
+}
+
 
 // ── call the ingest server (holds the raw token; the MCP client never sees it) ──
 async function ingest(path, { method = 'GET', body, headers: extra } = {}) {
@@ -181,6 +227,11 @@ function buildServer() {
       if (status === 0) return asText({ error: 'unreachable', message: json.message }, true);
       // Terminal states return immediately; anything else waits out the window.
       if (json.status === 'completed' || json.status === 'failed') return asText(json);
+      // A paused queue will not move until someone fixes the cause (a spent
+      // quota, a logged-out CLI). Waiting here would only burn the model's turns.
+      if (json.status === 'paused_rate_limit') {
+        return asText({ ...json, hint: 'the evaluation queue is PAUSED (provider quota or login problem), not running. Tell the user it is paused and why (see error); it resumes after they fix it in the web UI Queue tab.' });
+      }
       const left = deadline - Date.now();
       if (left <= 0) return asText({ ...json, waited_ms: STATUS_LONGPOLL_MS, hint: 'still running — call get_status again, or report progress to the user and check back later' });
       await sleep(Math.min(STATUS_POLL_MS, left));
@@ -399,6 +450,129 @@ function buildServer() {
       method: 'POST', body: { jd_text, company, role, source_url },
     });
     return asText(r, Boolean(r.error));
+  });
+
+  server.registerTool('generate_cv', {
+    title: 'Create a tailored CV for a role, regardless of its score',
+    description: [
+      'Build a tailored CV PDF for a job, even when its evaluation scored below the automatic CV threshold. career-ops writes the CV itself from the candidate files; you do not compose any CV content.',
+      '',
+      'WHEN TO USE: the user asks for a CV/resume for a role in any wording: "I need the CV for Swisslinx", "create CV for the Power Platform role", "make me a resume for this <url>", "generate the CV anyway", "I have to apply, build the CV". Use THIS tool for every such request. NEVER use render_cv for it, and never write a CV into chat.',
+      '',
+      'HOW TO CALL: pass whatever the user gave you:',
+      '  · company and/or role, as the user said them ("Swisslinx", "Power Platform Architect"),',
+      '  · url, if they sent a job link,',
+      '  · jd_text, if they pasted the job description,',
+      '  · report_num, only when you already know it (e.g. from a previous candidates list).',
+      '',
+      'RESULTS:',
+      '  · accepted:true, then tell the user the CV is being built (mode cv_only takes ~3 min, evaluate_then_cv ~8 min), and call get_status with job_id. When completed, call get_evaluation: its `pdf` field is the CV path. If `pdf` is null or status is failed, say the CV was NOT produced.',
+      '  · ambiguous:true, then show the user the `candidates` (company, role, score, date) and ask which one. Call again with that report_num.',
+      '  · not_found:true, then ask the user for the job URL or the job description text and call again with url or jd_text.',
+      '  · in_progress:true, then a CV or evaluation for it is already running; poll get_status with that job_id instead of calling again.',
+    ].join('\n'),
+    inputSchema: {
+      company: z.string().optional().describe('Company name as the user said it.'),
+      role: z.string().optional().describe('Role/title words as the user said them.'),
+      url: z.string().optional().describe('Job posting URL, if the user sent one.'),
+      jd_text: z.string().optional().describe('Full job description text, if the user pasted it.'),
+      report_num: z.union([z.string().regex(/^\d+$/), z.number().int().positive()]).optional().describe('Report number of an existing evaluation, e.g. from a candidates list.'),
+    },
+  }, async ({ company, role, url, jd_text, report_num }) => {
+    if (!company && !role && !url && !jd_text && !report_num) {
+      return asText({ error: 'missing_target', message: 'Say which role: pass company and/or role, a url, or jd_text. Ask the user if they did not say.' }, true);
+    }
+    const { status, json } = await ingest('/cv', {
+      method: 'POST',
+      body: { company, role, url, jd_text, report_num: report_num !== undefined ? String(report_num) : undefined, note: 'cv request via hermes' },
+    });
+    if (status === 0) return asText({ error: 'unreachable', message: json.message }, true);
+    if (status === 401) return asText({ error: 'unauthorized' }, true);
+    // 300 ambiguous / 404 not_found / 409 in_progress are answers to relay, not failures.
+    return asText(json, status >= 500 || (status === 400));
+  });
+
+  server.registerTool('render_cv', {
+    title: 'Render a tailored CV to .tex and .pdf in output/',
+    description: [
+      'Build a tailored CV from a JSON payload and compile it to PDF in career-ops output/. This is the ONLY way to produce an actual CV file — writing the CV into chat does not create anything on disk.',
+      '',
+      'DO NOT USE for "I need the CV for X" / "create a CV for this role": that is generate_cv, which composes the content server-side. This tool is ONLY for rendering a complete AltaCV payload you already have in full (every field below). A partial payload is rejected.',
+      '',
+      'The payload is the AltaCV schema from modes/pdf.md: name, tagline, personal{phone,email,location,linkedin,citizenship[]}, summary, experience[{role,company,dates,location,bullets[]}], achievements[{icon,title,detail}], skill_tags[[...]], education[], certifications[], languages[{name,level 1-5}], previous_experience[].',
+      'Pass PLAIN TEXT — LaTeX escaping is handled for you. Do not include a photo; it resolves from assets/.',
+      'Keep summary to ~120 words: longer pushes the layout onto a third page.',
+      'NEVER invent experience, employers, figures or certifications. Only reword what the source documents support.',
+      '',
+      'Returns the .tex and .pdf paths plus `compiled`. A valid .tex does NOT imply a PDF — if `compiled` is false, read `compileError` and report the PDF as NOT generated.',
+    ].join('\n'),
+    inputSchema: {
+      payload: z.record(z.any()).describe('The AltaCV CV payload object (see modes/pdf.md).'),
+      company_slug: z.string().min(1).max(60).describe('Short company/role slug for the filename, e.g. "penta-teams-csa".'),
+      date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().describe('YYYY-MM-DD for the filename; defaults to today.'),
+    },
+  }, async ({ payload, company_slug, date }) => {
+    const slug = slugify(company_slug);
+    if (!slug) return asText({ error: 'bad_slug', message: 'company_slug must contain at least one alphanumeric character.' }, true);
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+      return asText({ error: 'bad_payload', message: 'payload must be a JSON object using the AltaCV schema.' }, true);
+    }
+    if (!payload.name || !Array.isArray(payload.experience) || payload.experience.length === 0) {
+      return asText({ error: 'bad_payload', message: 'payload needs at least `name` and a non-empty `experience` array. Check modes/pdf.md — the classic schema (contact_line/projects) is a different shape and renders empty.' }, true);
+    }
+
+    // Degrade unknown icons instead of letting them abort the compile.
+    const swapped = [];
+    for (const a of payload.achievements || []) {
+      if (a && a.icon && !SAFE_ICONS.has(a.icon)) { swapped.push(a.icon); a.icon = 'faGem'; }
+    }
+
+    const day = date || new Date().toISOString().slice(0, 10);
+    const base = `cv-${await candidateSlug()}-${slug}-${day}`;
+    const jsonPath = join(tmpdir(), `${base}.json`);
+    const texRel = `output/${base}.tex`;
+    const pdfRel = `output/${base}.pdf`;
+
+    await writeFile(jsonPath, JSON.stringify(payload), 'utf8');
+
+    const build = await run('node', ['build-cv-altacv.mjs', jsonPath, texRel]);
+    if (!build.ok) {
+      return asText({ error: 'build_failed', stage: 'build-cv-altacv', message: build.stderr.trim() || build.stdout.trim() }, true);
+    }
+
+    // Clear any PDF left by an earlier run: otherwise a failed compile leaves the
+    // previous file in place and every existence check below reports success.
+    try { await unlink(join(APP_DIR, pdfRel)); } catch { /* nothing to clear */ }
+
+    const gen = await run('node', ['generate-latex.mjs', texRel, pdfRel]);
+    // generate-latex.mjs prints pretty-printed JSON, so the last line is just "}".
+    // Take the first complete {...} block out of stdout.
+    let report;
+    const raw = (gen.stdout || '').trim();
+    const first = raw.indexOf('{'), last = raw.lastIndexOf('}');
+    try { report = JSON.parse(raw.slice(first, last + 1)); }
+    catch { report = { valid: false, compiled: false, parse_failed: true, raw: (raw || gen.stderr).slice(-2000) }; }
+
+    // Never report a path we have not confirmed exists (modes/pdf.md). The file
+    // is the ground truth — it can only be here if this run wrote it.
+    let pdfBytes = 0;
+    try { pdfBytes = (await stat(join(APP_DIR, pdfRel))).size; } catch { pdfBytes = 0; }
+
+    const result = {
+      tex: `/app/${texRel}`,
+      pdf: pdfBytes > 0 ? `/app/${pdfRel}` : null,
+      compiled: pdfBytes > 0,
+      pdf_size_kb: pdfBytes ? Math.round(pdfBytes / 102.4) / 10 : 0,
+      template: report.template,
+      valid: report.valid,
+      issues: report.issues || [],
+      compileError: report.compileError || null,
+      icons_replaced: swapped,
+      note: pdfBytes > 0
+        ? 'PDF written to the career-ops output folder on the host.'
+        : 'NO PDF was produced — report this as a failure, do not claim the file exists.',
+    };
+    return asText(result, !result.compiled);
   });
 
   return server;

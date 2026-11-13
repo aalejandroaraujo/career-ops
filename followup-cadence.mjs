@@ -250,7 +250,16 @@ export function computeNextFollowupDate(status, appDate, lastFollowupDate, follo
 }
 
 // --- Main analysis ---
-function analyze() {
+/**
+ * Compute the follow-up queue.
+ *
+ * Exported so the ingest server's /today endpoint reads the SAME numbers the
+ * CLI prints — a dashboard that disagrees with `node followup-cadence.mjs`
+ * is worse than no dashboard.
+ *
+ * @returns {object} {metadata, entries, cadenceConfig} or {error}.
+ */
+export function analyze() {
   const apps = parseTracker();
   if (apps.length === 0) {
     return { error: 'No applications found in tracker.' };

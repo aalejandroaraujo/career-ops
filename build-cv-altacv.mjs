@@ -19,7 +19,7 @@
  */
 
 import { readFile, writeFile, stat, copyFile, mkdir } from 'fs/promises';
-import { existsSync } from 'fs';
+import { existsSync, readFileSync } from 'fs';
 import { resolve, dirname, basename, extname, join } from 'path';
 import { fileURLToPath } from 'url';
 
@@ -30,6 +30,46 @@ const PLACEHOLDER_RE = /\{\{[A-Z_]+\}\}/g;
 // Icons we allow in \cvachievement / \cvsection markers. Anything else falls
 // back to a safe default so a bad/injected icon name can't emit arbitrary TeX.
 const SAFE_ICON_RE = /^\\?fa[A-Za-z0-9]+(\[[a-z]+\])?$/;
+
+// Personal fields the DACH/Swiss layout expects, mapped from the key they carry
+// in config/profile.yml to the key buildPersonalInfo() reads in the payload.
+// The names differ on both sides (marital_status -> marital, residence_permit ->
+// permit), which is exactly why they get dropped silently: whoever writes the
+// payload has no error telling them the data existed and went missing.
+const PROFILE_PERSONAL_MAP = [
+  ['marital_status', 'marital'],
+  ['children', 'children'],
+  ['birthyear', 'birthyear'],
+  ['residence_permit', 'permit'],
+];
+
+/**
+ * Warn when config/profile.yml declares personal details that the payload drops.
+ * Deliberately scoped to fields the profile actually sets: a candidate targeting
+ * an ATS/US-style CV simply leaves them out of profile.yml and sees no warning.
+ * Parsing is a narrow scan of the top-level `candidate:` block rather than a full
+ * YAML load, so this check can never fail the build over an unrelated key.
+ */
+function findDroppedPersonalFields(payload) {
+  const profilePath = resolve(__dirname, 'config', 'profile.yml');
+  if (!existsSync(profilePath)) return [];
+  let raw;
+  try { raw = readFileSync(profilePath, 'utf-8'); } catch { return []; }
+
+  const personal = (payload && payload.personal) || {};
+  const dropped = [];
+  for (const [profileKey, payloadKey] of PROFILE_PERSONAL_MAP) {
+    const m = raw.match(new RegExp(`^\\s{2}${profileKey}:\\s*(.+?)\\s*$`, 'm'));
+    if (!m) continue;
+    const value = m[1].replace(/^["']|["']$/g, '').trim();
+    // An empty or explicitly-null profile value means "I don't want this".
+    if (!value || value === '""' || value === "''" || value === 'null') continue;
+    if (personal[payloadKey] === undefined || personal[payloadKey] === '') {
+      dropped.push(`${profileKey} ("${value}") -> personal.${payloadKey}`);
+    }
+  }
+  return dropped;
+}
 
 function escapeLatex(text) {
   if (typeof text !== 'string') return '';
@@ -101,6 +141,8 @@ function buildPersonalInfo(p) {
   if (p.homepage) lines.push(`  \\homepage{${escapeLatex(p.homepage)}}`);
   if (p.birthyear) lines.push(`  \\printinfo{\\faBirthdayCake}{${escapeLatex(String(p.birthyear))}}`);
   if (p.marital) lines.push(`  \\printinfo{\\faRing}{${escapeLatex(p.marital)}}`);
+  // Children — DACH/Swiss CVs commonly state this alongside marital status.
+  if (p.children) lines.push(`  \\printinfo{\\faChild}{${escapeLatex(String(p.children))}}`);
   if (p.permit) lines.push(`  \\printinfo{\\faIdCard}{${escapeLatex(p.permit)}}`);
   // Non-standard fields via \printinfo so we don't depend on custom macros.
   const citizenships = Array.isArray(p.citizenship) ? p.citizenship : (p.citizenship ? [p.citizenship] : []);
@@ -280,6 +322,12 @@ async function main() {
   try {
     const report = await render(payload, resolve(outputPath));
     if (!report.photo) report.warning = 'No photo found (looked for payload.photo or assets/headshot.{jpg,jpeg,png}). Compiled without a photo.';
+    const dropped = findDroppedPersonalFields(payload);
+    if (dropped.length) {
+      report.droppedPersonalFields = dropped;
+      report.warning = [report.warning, `config/profile.yml sets personal details this payload omits: ${dropped.join('; ')}. Swiss/DACH CVs normally carry them — add them to payload.personal or clear them in profile.yml.`]
+        .filter(Boolean).join(' ');
+    }
     console.log(JSON.stringify(report, null, 2));
     process.exit(0);
   } catch (err) {

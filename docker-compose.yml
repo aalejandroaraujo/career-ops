@@ -36,6 +36,13 @@ services:
       # container's own subscription login, and an env key would override it.
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      # Provider selection: which AI CLI processes batch evaluations.
+      - CAREEROPS_PROVIDER=${CAREEROPS_PROVIDER:-}
+      # Qwen Code API key (for when provider is "qwen").
+      - BAILIAN_TOKEN_PLAN_API_KEY=${BAILIAN_TOKEN_PLAN_API_KEY:-}
+      # Token Plan base URL (International/Global endpoint).
+      # This matches the local ~/.qwen/settings.json configuration.
+      - OPENAI_BASE_URL=${OPENAI_BASE_URL:-https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1}
     # Chromium needs a larger /dev/shm than the default 64M.
     shm_size: "1gb"
     # Dashboard TUI is interactive; expose nothing by default but allow `-it`.

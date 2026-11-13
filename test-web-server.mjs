@@ -12,6 +12,8 @@
 
 import http from 'node:http';
 import { spawn } from 'node:child_process';
+import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -81,7 +83,20 @@ console.log('\n1. Fail-closed startup');
 }
 
 const PORT = 8832;
-const server = boot({ CAREEROPS_WEB_PASSWORD: PASSWORD }, PORT);
+// A throwaway scouted inbox. The write endpoints allow-list against this file,
+// so the gate has to be exercisable without touching data/pipeline.md.
+const PIPE_DIR = mkdtempSync(join(tmpdir(), 'co-web-pipe-'));
+const PIPE_FILE = join(PIPE_DIR, 'pipeline.md');
+writeFileSync(PIPE_FILE, `# Pipeline
+
+## Pending
+
+- [ ] https://example.com/scouted | Acme | Staff AI Engineer | Zurich, Switzerland
+
+## Processed
+`);
+
+const server = boot({ CAREEROPS_WEB_PASSWORD: PASSWORD, CAREEROPS_PIPELINE_FILE: PIPE_FILE }, PORT);
 
 try {
   eq(await waitUp(PORT), true, 'starts with a valid password');
@@ -173,12 +188,198 @@ try {
     seen.length = 0;
     // /ingest is deliberately unreachable: a compromised browser session must
     // not be able to enqueue work for the credentialed evaluation container.
-    for (const p of ['ingest', 'status/1', 'evaluation/1', 'health']) {
+    for (const p of ['ingest', 'status/1', 'evaluation/1']) {
       const r = await fetch(`http://127.0.0.1:${PORT}/api/${p}`, { headers: auth });
       if (r.status !== 404) { fail(`/api/${p} was proxied (${r.status}) — only tracker/* may be`); break; }
     }
     pass('only /api/tracker/* is proxied; /ingest and batch endpoints are not');
     eq(seen.length, 0, 'no non-tracker request reached the upstream at all');
+  }
+
+  console.log('\n6b. Queue health is the one non-tracker exception');
+  {
+    // /api/health exists because both other tabs show finished work only, so a
+    // stalled queue renders as an empty list (see 2026-09-01). It is a narrow
+    // exception to section 6: GET only, read-only upstream, still behind auth.
+    const auth = { cookie: globalThis.SESSION };
+
+    seen.length = 0;
+    const anon = await fetch(`http://127.0.0.1:${PORT}/api/health`);
+    eq(anon.status, 401, 'health needs a session — it names queued URLs and the account email');
+    eq(seen.length, 0, 'an unauthenticated health probe never reaches the upstream');
+
+    seen.length = 0;
+    const r = await fetch(`http://127.0.0.1:${PORT}/api/health`, { headers: auth });
+    eq(r.status, 200, 'an authenticated health read succeeds');
+    eq(seen[0].path, '/health/queue', 'it proxies to the ingest health endpoint');
+    eq(seen[0].method, 'GET', 'as a GET');
+    eq(seen[0].headers.authorization, 'Bearer stubtok', 'the ingest token stays server-side');
+
+    seen.length = 0;
+    const post = await fetch(`http://127.0.0.1:${PORT}/api/health`, { method: 'POST', headers: auth });
+    eq(post.status, 405, 'health refuses non-GET — it must never become a write path');
+    eq(seen.length, 0, 'a rejected method never reaches the upstream');
+  }
+
+  console.log('\n6c. The scouted write paths are gated three ways');
+  {
+    // These are the only writes the browser can make into the evaluation
+    // container. /ingest itself stays unreachable (section 6), so the browser
+    // can never name a URL of its own choosing — it may only act on a row the
+    // scanner already queued.
+    const auth = { cookie: globalThis.SESSION };
+    const post = (p, body, headers = auth) => fetch(`http://127.0.0.1:${PORT}/api/pipeline/${p}`, {
+      method: 'POST', headers: { ...headers, 'content-type': 'application/json' }, body: JSON.stringify(body),
+    });
+
+    seen.length = 0;
+    const anon = await fetch(`http://127.0.0.1:${PORT}/api/pipeline/evaluate`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ url: 'https://example.com/scouted' }),
+    });
+    eq(anon.status, 401, 'gate 1: no session, no evaluation');
+    eq(seen.length, 0, 'and nothing reached the evaluation container');
+
+    seen.length = 0;
+    const foreign = await post('evaluate', { url: 'https://evil.example/attacker-chosen' });
+    eq(foreign.status, 404, 'gate 2: a URL that is not in the inbox is refused');
+    eq(seen.length, 0, 'an off-list URL never reaches the evaluation container');
+
+    seen.length = 0;
+    const ssrf = await post('evaluate', { url: 'http://169.254.169.254/latest/meta-data/' });
+    eq(ssrf.status, 404, 'the cloud metadata service is not in the inbox either');
+    eq(seen.length, 0, 'and never gets proxied');
+
+    seen.length = 0;
+    eq((await post('evaluate', {})).status, 400, 'a missing url is a 400');
+    eq((await fetch(`http://127.0.0.1:${PORT}/api/pipeline/evaluate`, { headers: auth })).status, 405,
+      'GET is not an evaluation trigger');
+    eq(seen.length, 0, 'malformed requests never reach the upstream');
+
+    seen.length = 0;
+    const good = await post('evaluate', { url: 'https://example.com/scouted' });
+    eq(good.status, 200, 'a pending URL is accepted and proxied');
+    eq(seen[0].path, '/pipeline/evaluate', 'to the pipeline endpoint, not /ingest');
+    eq(seen[0].headers.authorization, 'Bearer stubtok', 'with the token attached server-side');
+    eq(JSON.parse(seen[0].body).url, 'https://example.com/scouted', 'carrying the URL');
+
+    // The body is rebuilt, never forwarded: a re-score is a paid operation and
+    // must stay a deliberate CLI/Hermes act, not something a button can trigger.
+    seen.length = 0;
+    await post('evaluate', { url: 'https://example.com/scouted', force: true, note: 'sneaky' });
+    eq(JSON.parse(seen[0].body).force, undefined, 'a force flag from the browser is stripped');
+    eq(JSON.parse(seen[0].body).note, undefined, 'and so is an attacker-supplied note');
+
+    seen.length = 0;
+    await post('dismiss', { url: 'https://example.com/scouted', reason: 'x'.repeat(500) });
+    eq(seen[0].path, '/pipeline/dismiss', 'dismiss proxies to its own endpoint');
+    eq(JSON.parse(seen[0].body).reason.length, 200, 'and the reason is truncated');
+  }
+
+  console.log('\n6e. Today is read-only');
+  {
+    const auth = { cookie: globalThis.SESSION };
+    seen.length = 0;
+    eq((await fetch(`http://127.0.0.1:${PORT}/api/today`)).status, 401, 'today needs a session');
+    eq(seen.length, 0, 'and does not reach the upstream unauthenticated');
+    const r = await fetch(`http://127.0.0.1:${PORT}/api/today`, { headers: auth });
+    eq(r.status, 200, 'an authenticated read succeeds');
+    eq(seen[0].path, '/today', 'proxied to the ingest today endpoint');
+    eq((await fetch(`http://127.0.0.1:${PORT}/api/today`, { method: 'POST', headers: auth })).status, 405,
+      'and it refuses non-GET');
+  }
+
+  console.log('\n6f. Queue repair, scanning and bulk triage');
+  {
+    // Every one of these is a write into the evaluation container, so they take
+    // the same session + budget gates as the scouted actions. None can name a
+    // URL: they act on the queue's own state.
+    const auth = { cookie: globalThis.SESSION };
+    const post = (p, body = {}) => fetch(`http://127.0.0.1:${PORT}${p}`, {
+      method: 'POST', headers: { ...auth, 'content-type': 'application/json' }, body: JSON.stringify(body),
+    });
+
+    seen.length = 0;
+    for (const p of ['/api/queue/clear-lock', '/api/queue/unpause', '/api/queue/reset',
+      '/api/queue/drain', '/api/scan', '/api/pipeline/dismiss-older']) {
+      const r = await fetch(`http://127.0.0.1:${PORT}${p}`, {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}',
+      });
+      if (r.status !== 401) { fail(`${p} was reachable without a session (${r.status})`); break; }
+    }
+    pass('every repair action needs a session');
+    eq(seen.length, 0, 'and none reach the upstream unauthenticated');
+
+    seen.length = 0;
+    eq((await post('/api/queue/clear-lock')).status, 200, 'clear-lock proxies');
+    eq(seen[0].path, '/queue/clear-lock', 'to the ingest repair endpoint');
+    eq(seen[0].headers.authorization, 'Bearer stubtok', 'with the token server-side');
+
+    seen.length = 0;
+    await post('/api/queue/reset', { id: '204' });
+    eq(JSON.parse(seen[0].body).id, '204', 'reset carries the job id');
+
+    seen.length = 0;
+    eq((await fetch(`http://127.0.0.1:${PORT}/api/queue/clear-lock`, { headers: auth })).status, 405,
+      'a repair action refuses GET');
+    eq(seen.length, 0, 'and never reaches the upstream on the wrong method');
+
+    // GET /api/scan is progress, not an action — it must not spend the budget.
+    seen.length = 0;
+    eq((await fetch(`http://127.0.0.1:${PORT}/api/scan`, { headers: auth })).status, 200, 'scan status is readable');
+    eq(seen[0].method, 'GET', 'as a GET');
+
+    seen.length = 0;
+    eq((await fetch(`http://127.0.0.1:${PORT}/api/queue/log/204`, { headers: auth })).status, 200, 'the worker log is readable');
+    eq(seen[0].path, '/queue/log/204', 'proxied by id');
+    seen.length = 0;
+    eq((await fetch(`http://127.0.0.1:${PORT}/api/queue/log/abc`, { headers: auth })).status, 404,
+      'a non-numeric job id is refused');
+    eq(seen.length, 0, 'and never reaches the upstream');
+  }
+
+  console.log('\n6c2. Provider/model picker persists through the ingest server');
+  {
+    const auth = { cookie: globalThis.SESSION };
+    seen.length = 0;
+    eq((await fetch(`http://127.0.0.1:${PORT}/api/config/provider`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ provider: 'claude', model: 'sonnet' }),
+    })).status, 401, 'saving a provider requires a session');
+    eq(seen.length, 0, 'and never reaches the upstream unauthenticated');
+
+    seen.length = 0;
+    eq((await fetch(`http://127.0.0.1:${PORT}/api/config/provider`, { headers: auth })).status, 405,
+      'GET on the save route is refused');
+    eq(seen.length, 0, 'and never reaches the upstream');
+
+    // It used to answer {ok:true} locally and save nothing, so a reload
+    // reverted the choice and Telegram/daily-scout never saw it.
+    seen.length = 0;
+    eq((await fetch(`http://127.0.0.1:${PORT}/api/config/provider`, {
+      method: 'POST', headers: { ...auth, 'content-type': 'application/json' },
+      body: JSON.stringify({ provider: 'claude', model: 'sonnet' }),
+    })).status, 200, 'an authenticated save succeeds');
+    eq(seen[0]?.path, '/config', 'it is proxied to the ingest /config endpoint');
+    eq(seen[0]?.method, 'POST', 'as a POST');
+    eq(JSON.parse(seen[0]?.body || '{}').model, 'sonnet', 'with the model in the body');
+    eq(seen[0]?.headers.authorization, 'Bearer stubtok', 'the ingest token stays server-side');
+  }
+
+  console.log('\n6d. Gate 3: the write budget');
+  {
+    // Each evaluation costs minutes of a credentialed worker, and a button is
+    // much easier to lean on than a curl.
+    const auth = { cookie: globalThis.SESSION };
+    let limited = 0;
+    for (let i = 0; i < 20; i++) {
+      const r = await fetch(`http://127.0.0.1:${PORT}/api/pipeline/evaluate`, {
+        method: 'POST', headers: { ...auth, 'content-type': 'application/json' },
+        body: JSON.stringify({ url: 'https://example.com/scouted' }),
+      });
+      if (r.status === 429) limited++;
+    }
+    eq(limited > 0, true, 'a burst of evaluations is rate-limited');
   }
 
   console.log('\n7. Static serving');
@@ -212,6 +413,7 @@ try {
     eq(/Max-Age=0/.test(r.headers.get('set-cookie') || ''), true, 'logout expires the cookie');
   }
 } finally {
+  rmSync(PIPE_DIR, { recursive: true, force: true });
   server.proc.kill();
   stub.close();
 }

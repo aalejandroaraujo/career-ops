@@ -86,7 +86,12 @@ export default {
  * - location: prefer `fullLocation`; else assemble from city/region/country
  *   parts (skipping empties); append "Remote" when `location.remote` is true.
  * - url: `j.ref` is an `api.smartrecruiters.com/v1/companies/<slug>/postings/<id>`
- *   URL — rewrite to the public `jobs.smartrecruiters.com/<slug>/postings/<id>`.
+ *   URL — rewrite to the public `jobs.smartrecruiters.com/<slug>/<id>-<title>`.
+ *   The `postings/` segment is API-only: carrying it across produced
+ *   `jobs.smartrecruiters.com/Swissquote/postings/744000145520159`, which
+ *   SmartRecruiters serves as "Oops, you've gone too far!" (404). The slug is
+ *   taken from the ref rather than the company name because the public path is
+ *   case-sensitive ("Swissquote", not "swissquote").
  *   If `ref` is missing, synthesise a URL from the company slug + posting id.
  *
  * @param {any} json
@@ -110,8 +115,13 @@ export function parseSmartRecruitersResponse(json, companyName) {
           && parsedRef.protocol === 'https:'
           && parsedRef.hostname === 'api.smartrecruiters.com'
           && parsedRef.pathname.startsWith('/v1/companies/')) {
-        const restOfPath = parsedRef.pathname.slice('/v1/companies/'.length);
-        url = `https://jobs.smartrecruiters.com/${restOfPath}`;
+        // /v1/companies/<slug>/postings/<id> → <slug>, <id>. Anything else is
+        // a shape we do not recognise, and a guessed URL is worse than none.
+        const m = parsedRef.pathname.match(/^\/v1\/companies\/([^/]+)\/postings\/([^/]+)\/?$/);
+        if (m) {
+          const id = j.id || m[2];
+          url = `https://jobs.smartrecruiters.com/${m[1]}/${id}${slugified ? `-${slugified}` : ''}`;
+        }
       }
     }
     if (!url && j.id) {

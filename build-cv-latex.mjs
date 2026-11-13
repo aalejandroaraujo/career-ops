@@ -49,6 +49,13 @@ function sanitizeUrl(url) {
   return url;
 }
 
+function buildGithubBlock(url, display) {
+  // The template used to hardcode this line, so an empty github in profile.yml
+  // rendered a bare FontAwesome icon followed by an empty underline.
+  if (!url || !display) return '';
+  return `        \\href{${url}}{\\raisebox{-0.2\\height}\\faGithub\\ \\underline{${display}}}`;
+}
+
 function buildEducation(entries) {
   if (!Array.isArray(entries) || entries.length === 0) return '';
   const blocks = [];
@@ -159,6 +166,8 @@ async function main() {
     LINKEDIN_DISPLAY: escapeLatex(linkedinDisplay),
     GITHUB_URL: githubUrl,
     GITHUB_DISPLAY: escapeLatex(githubDisplay),
+    GITHUB_BLOCK: buildGithubBlock(githubUrl, escapeLatex(githubDisplay)),
+    PROJECTS_HEADING: escapeLatex(payload.projects_heading || 'Personal Projects'),
     EDUCATION: buildEducation(payload.education),
     EXPERIENCE: buildExperience(payload.experience),
     PROJECTS: buildProjects(payload.projects),
@@ -276,6 +285,8 @@ async function runSelfTest() {
     LINKEDIN_DISPLAY: escapeLatex(linkedinDisplay),
     GITHUB_URL: githubUrl,
     GITHUB_DISPLAY: escapeLatex(githubDisplay),
+    GITHUB_BLOCK: buildGithubBlock(githubUrl, escapeLatex(githubDisplay)),
+    PROJECTS_HEADING: escapeLatex(sample.projects_heading || 'Personal Projects'),
     EDUCATION: buildEducation(sample.education),
     EXPERIENCE: buildExperience(sample.experience),
     PROJECTS: buildProjects(sample.projects),

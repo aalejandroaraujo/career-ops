@@ -46,8 +46,14 @@
 \colorlet{heading}{Black}
 \colorlet{headingrule}{Black}
 \colorlet{accent}{Blue}
-\colorlet{emphasis}{SlateGrey}
-\colorlet{body}{LightGrey}
+% Body text is BLACK, not AltaCV's default #666666 grey. The experience bullets
+% render at \small in Lato, and at that size/weight anything lighter than pure
+% black reads as grey next to the black headings and role titles (#2E2E2E was
+% tried first and still looked washed out). Hierarchy comes from size and weight
+% here, not from colour. `body!30` (dividers, unfilled rating markers) stays a
+% light grey, which is AltaCV's intent for them.
+\colorlet{emphasis}{Black}
+\colorlet{body}{Black}
 
 % Markers
 \renewcommand{\cvItemMarker}{{\small\textbullet}}
@@ -56,7 +62,7 @@
 % Compact one-line certification entry with a small marker — lets many certs fit
 % without the tall two-row \cvachievement layout (whose icon is \LARGE).
 \newcommand{\cvcert}[1]{%
-  {\footnotesize\color{accent}\faCertificate}\hspace{0.6em}{\small #1}\par\medskip%
+  {\footnotesize\color{accent}\BeginAccSupp{method=escape,ActualText={}}\faCertificate\EndAccSupp{}}\hspace{0.6em}{\small #1}\par\medskip%
 }
 
 % Language/skill rating: circles PLUS the numeric level after them, so the level
@@ -97,8 +103,13 @@
   \end{minipage}%
 }
 % Nudge the right-hand photo inward from the page edge (moves it toward the left).
+% Vertical position of the right-hand photo. \raisebox with a negative value
+% lowers the circle down the page. 6mm is the practical maximum for a 2-page CV:
+% the header grows with it, and 7mm pushes the body onto a third page.
+\newlength{\photodrop}
+\setlength{\photodrop}{6mm}
 \renewcommand{\altacv@add@photo@right}[1]{%
-  \appto{\altacv@right@photos}{\@makeaphoto{\altacv@photo@diam@right}{#1}\hspace{1.2cm}}%
+  \appto{\altacv@right@photos}{\raisebox{-\photodrop}{\@makeaphoto{\altacv@photo@diam@right}{#1}}\hspace{1.2cm}}%
   \addtolength{\altacv@photos@width}{\altacv@photo@diam@right}%
   \addtolength{\altacv@photos@width}{1.2cm}%
 }

@@ -48,6 +48,12 @@ RUN npm install --no-audit --no-fund \
 # /app/node_modules) so the named node_modules volume can't shadow it.
 RUN npm install -g @anthropic-ai/claude-code
 
+# Qwen Code CLI — alternative provider for batch workers (`qwen -p`).
+# Same global install pattern as Claude; the provider adapter in
+# batch/provider.sh selects which one to invoke at runtime.
+# Note: the correct package is @qwen-code/qwen-code, not qwen-code (which is a stub).
+RUN npm install -g @qwen-code/qwen-code || true
+
 # Non-root runtime home owned by uid 1000 (the host user). The container runs
 # unprivileged as 1000:1000 (see docker-compose.yml); HOME points here and the
 # `careerops-claude-home` named volume mounts here, so Claude Code's session

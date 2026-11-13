@@ -25,9 +25,33 @@
     <header>
       <div class="bar">
         <h1>career-ops</h1>
+        <!-- Which AI runs evaluations and CVs. Saved server-side, so it applies
+             to Telegram, Hermes and daily-scout too, not just this browser. -->
+        <div id="modelPicker" class="model-picker">
+          <button id="modelBtn" class="model-btn" type="button" aria-haspopup="dialog" aria-expanded="false" aria-controls="modelPanel">
+            <span class="model-kicker">AI</span><span id="modelLabel" class="model-label">…</span>
+          </button>
+          <div id="modelPanel" class="model-panel" role="dialog" aria-label="AI provider and model" hidden>
+            <div class="mp-title">Evaluations and CVs run on</div>
+            <div id="mpProviders" class="mp-seg" role="radiogroup" aria-label="Provider"></div>
+            <div id="mpModels" class="mp-models" role="radiogroup" aria-label="Model"></div>
+            <div id="mpLock" class="mp-lock" hidden></div>
+            <div class="mp-foot">
+              <span id="mpMsg" class="act-msg" role="status"></span>
+              <button id="mpCancel" type="button">Cancel</button>
+              <button id="mpSave" type="button" class="mp-save">Save</button>
+            </div>
+          </div>
+        </div>
         <button id="view" class="icon" title="Switch between cards and board" aria-label="Switch view">▦</button>
         <button id="refresh" class="icon" title="Reload" aria-label="Reload">↻</button>
         <button id="logout" class="icon" title="Sign out" aria-label="Sign out">⏻</button>
+      </div>
+      <div class="tabs">
+        <button id="tabTracker" class="tab on" data-tab="tracker">Applications</button>
+        <button id="tabToday" class="tab" data-tab="today">My day <span id="todayCount" class="badge"></span></button>
+        <button id="tabPipeline" class="tab" data-tab="pipeline">Scouted <span id="pipeCount" class="badge"></span></button>
+        <button id="tabHealth" class="tab" data-tab="health">Queue <span id="healthDot" class="dot" hidden></span></button>
       </div>
       <div class="controls">
         <input id="search" type="search" placeholder="Search company, role, notes…" autocomplete="off" />
@@ -35,10 +59,17 @@
       <div id="chips" class="chips"></div>
     </header>
 
+    <!-- Sits above the tab content, on every tab. A stalled evaluation queue is
+         not a thing you should have to go looking for. -->
+    <div id="banner" class="banner" role="status" hidden></div>
+
     <main>
       <div id="stats" class="stats"></div>
       <div id="rows" class="cards"></div>
       <div id="board" class="board" hidden></div>
+      <div id="today" class="today" hidden></div>
+      <div id="pipeline" class="cards" hidden></div>
+      <div id="health" class="health" hidden></div>
       <p id="empty" class="empty" hidden>Nothing here. Send a job URL or a JD to Hermes to get started.</p>
     </main>
   </div>

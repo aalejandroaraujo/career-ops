@@ -1640,6 +1640,31 @@ try {
   else fail('case-insensitive match failed');
 
   // Case 6: backward compatibility — no always_allow key behaves like stock allow/block
+  // require_remote_outside_home: keep EU hubs discoverable in `allow` without
+  // admitting every on-site role in them (127 of 191 scouted rows, 2026-09-02).
+  const remoteOnly = buildLocationFilter({
+    always_allow: ['Switzerland', 'Zurich', 'Basel'],
+    // 'Remote - US' is listed literally because a bare 'US' token is unusable
+    // (it matches Business, Prussia\u2026) \u2014 same reason the real portals.yml does it.
+    block: ['United States', 'India', 'Remote - US'],
+    allow: ['Remote', 'Switzerland', 'Zurich', 'Basel', 'London', 'Madrid', 'Spain', 'Germany'],
+    require_remote_outside_home: true,
+  });
+  const wantLoc = (got, expect, msg) => (got === expect ? pass(msg) : fail(msg));
+  wantLoc(remoteOnly('Zurich, Switzerland'), true, 'home market passes on-site');
+  wantLoc(remoteOnly('Basel'), true, 'a home city passes on-site');
+  wantLoc(remoteOnly('London'), false, 'an allowed foreign hub is rejected when on-site');
+  wantLoc(remoteOnly('Madrid, Spain'), false, 'and so is another foreign hub');
+  wantLoc(remoteOnly('Remote - Europe'), true, 'a remote role passes');
+  wantLoc(remoteOnly('Remote, London'), true, 'a remote role in a foreign hub passes');
+  wantLoc(remoteOnly('Berlin Office \u00b7 Bosnia \u00b7 Remote'), true, 'a multi-location row offering remote passes');
+  wantLoc(remoteOnly('Remote - US'), false, 'block still beats the remote marker');
+  wantLoc(remoteOnly(''), true, 'an empty location still passes (missing provider data)');
+
+  // Default OFF: every existing config must behave exactly as before.
+  wantLoc(buildLocationFilter({ allow: ['London'] })('London'), true,
+    'without the flag an allowed on-site hub still passes');
+
   const stockFilter = buildLocationFilter({
     allow: ['europe', 'remote'],
     block: ['france'],
@@ -2242,8 +2267,10 @@ try {
     fail(`row 1 location = ${JSON.stringify(jobs[1]?.location)}, expected "Paris, France, Remote"`);
   }
 
-  if (jobs[0]?.url === 'https://jobs.smartrecruiters.com/sgs/postings/abc-123') {
-    pass('parseSmartRecruitersResponse rewrites api.smartrecruiters.com → jobs.smartrecruiters.com');
+  // The public path is /<slug>/<id>-<title>, NOT /<slug>/postings/<id> — that
+  // is the API's shape and SmartRecruiters 404s it ("Oops, you've gone too far!").
+  if (jobs[0]?.url === 'https://jobs.smartrecruiters.com/sgs/abc-123-senior-pm') {
+    pass('parseSmartRecruitersResponse rewrites api ref → public posting URL, dropping /postings/');
   } else {
     fail(`row 0 url = ${JSON.stringify(jobs[0]?.url)}`);
   }
@@ -3560,6 +3587,8 @@ try {
   mkdirSync(fakeBin, { recursive: true });
 
   writeFileSync(join(batchDir, 'batch-runner.sh'), readFileSync(join(ROOT, 'batch/batch-runner.sh'), 'utf-8').replace(/\r\n/g, '\n'));
+  // batch-runner.sh now sources provider.sh for CLI abstraction; copy it too.
+  writeFileSync(join(batchDir, 'provider.sh'), readFileSync(join(ROOT, 'batch/provider.sh'), 'utf-8').replace(/\r\n/g, '\n'));
   if (process.platform === 'win32') {
     try { execFileSync('bash', ['-c', 'chmod +x batch/batch-runner.sh'], { cwd: tmp }); } catch {}
   } else {
@@ -3576,6 +3605,9 @@ try {
   ].join('\n') + '\n');
   writeFileSync(join(fakeBin, 'claude'), [
     '#!/usr/bin/env bash',
+    // The runner preflights `claude auth status`; the shim must answer it as the
+    // real CLI does, otherwise every batch aborts before it reaches a worker.
+    'if [ "$1" = "auth" ]; then echo \'{"loggedIn": true, "authMethod": "oauth"}\'; exit 0; fi',
     'echo "You\\x27ve hit your session limit · resets 12:30pm (Asia/Taipei)"',
     'exit 1',
   ].join('\n') + '\n');
@@ -3618,6 +3650,40 @@ try {
 
   rmSync(join(batchDir, 'batch-input.tsv'), { force: true });
   rmSync(join(batchDir, 'batch-prompt.md'), { force: true });
+  // A logged-out CLI must abort the batch up front, leaving every offer pending
+  // instead of marking each one "failed" and draining its retry budget (#auth-guard).
+  writeFileSync(join(batchDir, 'batch-input.tsv'), [
+    'id\turl\tsource\tnotes',
+    '1\thttps://example.com/one\tfixture\t-',
+  ].join('\n') + '\n');
+  writeFileSync(join(batchDir, 'batch-prompt.md'), 'URL={{URL}}\n');
+  rmSync(join(batchDir, 'batch-state.tsv'), { force: true });
+  writeFileSync(join(fakeBin, 'claude'), [
+    '#!/usr/bin/env bash',
+    'if [ "$1" = "auth" ]; then echo \'{"loggedIn": false, "authMethod": "none"}\'; exit 0; fi',
+    'echo "Failed to authenticate: OAuth session expired and could not be refreshed"',
+    'exit 1',
+  ].join('\n') + '\n');
+  if (process.platform !== 'win32') execFileSync('chmod', ['+x', join(fakeBin, 'claude')]);
+  // The guard exits non-zero on purpose, and run() drops stdout in that case,
+  // so capture the output directly.
+  let authOut = '';
+  try {
+    authOut = execFileSync('bash', [toBashPath(join(batchDir, 'batch-runner.sh')), '--parallel', '1'], {
+      cwd: tmp, env, encoding: 'utf-8', timeout: 30000, stdio: ['pipe', 'pipe', 'pipe'],
+    });
+  } catch (e) {
+    authOut = `${e.stdout || ''}${e.stderr || ''}`;
+  }
+  const authState = existsSync(join(batchDir, 'batch-state.tsv'))
+    ? readFileSync(join(batchDir, 'batch-state.tsv'), 'utf-8')
+    : '';
+  if (authOut.includes('not authenticated') && !/\bfailed\b/.test(authState)) {
+    pass('logged-out CLI aborts the batch without marking offers failed');
+  } else {
+    fail(`auth preflight wrong: out=${JSON.stringify(authOut.slice(-240))}, state=${JSON.stringify(authState)}`);
+  }
+
   rmSync(join(fakeBin, 'claude'), { force: true });
   writeFileSync(join(batchDir, 'batch-state.tsv'), [
     'id\turl\tstatus\tstarted_at\tcompleted_at\treport_num\tscore\terror\tretries',
@@ -3646,17 +3712,14 @@ try {
 console.log('\n15. Batch runner MCP isolation');
 
 try {
-  const batchRunner = readFileSync(join(ROOT, 'batch', 'batch-runner.sh'), 'utf-8');
-  // Workers must be spawned with --strict-mcp-config so they don't inherit the
-  // parent session's MCP servers (e.g. Playwright) and deadlock fighting over a
-  // single browser when --parallel > 1 (issue #506).
-  const claudeArgsLine = batchRunner
-    .split('\n')
-    .find(l => l.includes('claude_args=('));
-  if (claudeArgsLine && claudeArgsLine.includes('--strict-mcp-config')) {
+  // Provider abstraction moved CLI-specific flags to batch/provider.sh.
+  // Check that the Claude adapter still spawns with --strict-mcp-config so
+  // workers don't inherit the parent session's MCP servers (issue #506).
+  const providerSh = readFileSync(join(ROOT, 'batch', 'provider.sh'), 'utf-8');
+  if (providerSh.includes('--strict-mcp-config')) {
     pass('batch workers spawn with --strict-mcp-config (no inherited MCP)');
   } else {
-    fail('batch-runner.sh worker spawn missing --strict-mcp-config (issue #506 regression)');
+    fail('batch/provider.sh Claude adapter missing --strict-mcp-config (issue #506 regression)');
   }
 } catch (e) {
   fail(`Batch runner MCP isolation test crashed: ${e.message}`);
@@ -5625,6 +5688,9 @@ for (const suite of [
   'test-tracker-api.mjs',
   'test-mcp-tools.mjs',
   'test-web-server.mjs',
+  'test-queue-health.mjs',
+  'test-pipeline-store.mjs',
+  'test-cv-request.mjs',
 ]) {
   const suitePath = join(ROOT, suite);
   if (!existsSync(suitePath)) { warn(`${suite} not found — skipped`); continue; }

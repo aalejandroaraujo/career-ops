@@ -21,6 +21,7 @@ import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFile } from 'node:child_process';
+import { reportMeta } from './report-meta.mjs';
 import { promisify } from 'node:util';
 import {
   readTracker, readEvents, eventsFor, updateStatus, addNote,
@@ -66,6 +67,37 @@ function today() {
 }
 
 /**
+ * Write a pasted job description to jds/ and return its queue reference.
+ *
+ * Shared by POST /tracker/jd-text and the ingest server's POST /cv, so a JD sent
+ * with "make me the CV" lands in exactly the same shape as one sent to evaluate.
+ *
+ * @param {string} jdsDir - Target directory.
+ * @param {{jd_text: string, company?: string, role?: string, source_url?: string}} body - JD and metadata.
+ * @returns {{file: string, ref: string}} File name under jdsDir and its `local:jds/…` reference.
+ */
+export function saveJdText(jdsDir, body) {
+  const company = slugify(body?.company, 30);
+  const role = slugify(body?.role, 40);
+  const stem = [company, role].filter(Boolean).join('-') || 'pasted-jd';
+  mkdirSync(jdsDir, { recursive: true });
+
+  // Never overwrite an existing capture.
+  let file = `${today()}_${stem}.md`;
+  for (let n = 2; existsSync(join(jdsDir, file)); n++) file = `${today()}_${stem}-${n}.md`;
+
+  const header = [
+    `# ${body?.role || 'Job description'}${body?.company ? ` — ${body.company}` : ''}`,
+    '',
+    ...(body?.source_url ? [`Source: ${body.source_url}`, ''] : []),
+    '---',
+    '',
+  ].join('\n');
+  writeFileSync(join(jdsDir, file), header + String(body.jd_text).trim() + '\n');
+  return { file, ref: `local:jds/${file}` };
+}
+
+/**
  * Normalize a caller-supplied actor label.
  *
  * @param {string|undefined} raw - Value of the X-Actor header.
@@ -83,11 +115,17 @@ function actorOf(raw) {
  * @param {object} r - Row from readTracker().
  * @returns {object} Public row.
  */
+const REPORTS_DIR = join(dirname(fileURLToPath(import.meta.url)), 'reports');
+
 function publicRow(r) {
+  // jd_url is parsed out of the report header (the tracker has no URL column),
+  // so a client can link straight to the posting instead of making the reader
+  // open a report to find it. mtime-cached in report-meta.mjs.
+  const meta = reportMeta(REPORTS_DIR, r.report);
   return {
     app_uid: r.uid, num: r.num, date: r.date, company: r.company, role: r.role,
     score: r.score, status: r.status, pdf: r.pdf, report: r.report, notes: r.notes,
-    etag: r.etag,
+    etag: r.etag, report_num: meta.num, jd_url: meta.url, jd_note: meta.url_note,
   };
 }
 
@@ -260,25 +298,7 @@ export function createTrackerRoutes({ appendRow, nextId, isDuplicate, drain, log
       if (text.length < 100) {
         return { status: 400, body: { error: 'jd_too_short', hint: 'need at least 100 characters of job description' } };
       }
-      const company = slugify(body?.company, 30);
-      const role = slugify(body?.role, 40);
-      const stem = [company, role].filter(Boolean).join('-') || 'pasted-jd';
-      mkdirSync(jdsDir, { recursive: true });
-
-      // Never overwrite an existing capture.
-      let file = `${today()}_${stem}.md`;
-      for (let n = 2; existsSync(join(jdsDir, file)); n++) file = `${today()}_${stem}-${n}.md`;
-
-      const header = [
-        `# ${body?.role || 'Job description'}${body?.company ? ` — ${body.company}` : ''}`,
-        '',
-        ...(body?.source_url ? [`Source: ${body.source_url}`, ''] : []),
-        '---',
-        '',
-      ].join('\n');
-      writeFileSync(join(jdsDir, file), header + text + '\n');
-
-      const ref = `local:jds/${file}`;
+      const { file, ref } = saveJdText(jdsDir, { ...body, jd_text: text });
       if (isDuplicate(ref)) {
         return { status: 200, body: { duplicate: true, jd_file: `jds/${file}`, url: ref } };
       }

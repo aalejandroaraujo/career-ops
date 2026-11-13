@@ -1,14 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# career-ops batch runner — standalone orchestrator for claude -p workers
-# Reads batch-input.tsv, delegates each offer to a claude -p worker,
+# career-ops batch runner — standalone orchestrator for AI CLI workers
+# Reads batch-input.tsv, delegates each offer to a worker (claude -p or qwen -p),
 # tracks state in batch-state.tsv for resumability.
 #
-# NOTE: This script is Claude Code-specific. It uses claude -p with
-# --dangerously-skip-permissions and --append-system-prompt-file flags
-# that are not available in other CLIs. Multi-CLI support is out of scope
-# for now — contributions welcome.
+# Provider-agnostic: sources batch/provider.sh which adapts to the configured
+# CLI (Claude Code, Qwen Code, or future providers). Set provider in
+# config/profile.yml, via CAREEROPS_PROVIDER env var, or --provider flag.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -16,6 +15,7 @@ BATCH_DIR="$SCRIPT_DIR"
 INPUT_FILE="$BATCH_DIR/batch-input.tsv"
 STATE_FILE="$BATCH_DIR/batch-state.tsv"
 PROMPT_FILE="$BATCH_DIR/batch-prompt.md"
+CV_PROMPT_FILE="$BATCH_DIR/cv-prompt.md"
 LOGS_DIR="$BATCH_DIR/logs"
 TRACKER_DIR="$BATCH_DIR/tracker-additions"
 REPORTS_DIR="$PROJECT_DIR/reports"
@@ -36,7 +36,8 @@ START_FROM=0
 MAX_RETRIES=2
 MIN_SCORE=0
 SKIP_PDF=false
-MODEL=""  # empty = let claude -p use the Claude Max default
+MODEL=""  # empty = let the provider CLI use its default model
+PROVIDER_OVERRIDE=""  # --provider flag overrides config/profile.yml
 RATE_LIMIT_SLEEP=300
 BATCH_PAUSED=false
 STATUS_ONLY=false
@@ -48,10 +49,20 @@ is_decimal_number() {
   [[ "$1" =~ ^[0-9]+([.][0-9]+)?$ ]]
 }
 
+# ── Provider adapter ──────────────────────────────────────────────────────────
+# CAREEROPS_PROVIDER env > --provider flag > config/profile.yml > default (qwen)
+if [[ -n "${CAREEROPS_PROVIDER:-}" ]]; then
+  export PROVIDER="${CAREEROPS_PROVIDER}"
+elif [[ -n "$PROVIDER_OVERRIDE" ]]; then
+  export PROVIDER="$PROVIDER_OVERRIDE"
+fi
+# shellcheck source=batch/provider.sh
+source "$BATCH_DIR/provider.sh"
+
 usage() {
-  cat <<'USAGE'
-career-ops batch runner — process job offers in batch via claude -p workers
-Uses your default Claude model (Claude Max subscription).
+  cat <<USAGE
+career-ops batch runner — process job offers via AI CLI workers
+Current provider: $(provider_display_name) (override with --provider or CAREEROPS_PROVIDER)
 
 Usage: batch-runner.sh [OPTIONS]
 
@@ -59,7 +70,7 @@ Options:
   --parallel N         Number of parallel workers (default: 1)
   --dry-run            Show what would be processed, don't execute
   --retry-failed       Only retry offers marked as "failed" in state
-  --resume-paused      Resume offers paused by a Claude session/rate limit
+  --resume-paused      Resume offers paused by a session/rate limit
   --start-from N       Start from offer ID N (skip earlier IDs)
   --limit N            Max number of offers to process in this run
   --max-retries N      Max retry attempts per offer (default: 2)
@@ -67,9 +78,11 @@ Options:
   --skip-pdf           Skip PDF generation entirely (write ❌ in tracker PDF column)
   --rate-limit-sleep N Seconds to wait before retrying a rate-limited worker
                        (default: 300)
-  --model NAME         Claude model passed to `claude -p --model` (default:
-                       unset = Claude Max default). Use a cheaper model for
-                       large batches, e.g. `--model claude-sonnet-4-6`.
+  --model NAME         Model passed to the provider CLI's --model flag
+                       (default: unset = provider's default). E.g.
+                       `--model claude-sonnet-4-6` or `--model qwen3.7-plus`.
+  --provider NAME      Override the AI CLI provider: "claude" or "qwen"
+                       (default: from config/profile.yml or CAREEROPS_PROVIDER).
   --status             Show batch progress and a per-job table, then exit
   --watch              Live-refresh progress until the run completes
   -h, --help           Show this help
@@ -114,12 +127,21 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     --model) MODEL="$2"; shift 2 ;;
+    --provider) PROVIDER_OVERRIDE="$2"; shift 2 ;;
     --status) STATUS_ONLY=true; shift ;;
     --watch) WATCH_MODE=true; shift ;;
     -h|--help) usage; exit 0 ;;
     *) echo "Unknown option: $1"; usage; exit 1 ;;
   esac
 done
+
+# The adapter was sourced before the flags were parsed, so --provider never took
+# effect. Apply it now (the env var still wins), then settle the model:
+# CAREEROPS_MODEL env > --model > config/profile.yml provider.model.
+if [[ -z "${CAREEROPS_PROVIDER:-}" && -n "$PROVIDER_OVERRIDE" ]]; then
+  PROVIDER_NAME="$PROVIDER_OVERRIDE"
+fi
+MODEL="$(provider_resolve_model)"
 
 if ! [[ "$RATE_LIMIT_SLEEP" =~ ^[0-9]+$ ]]; then
   echo "ERROR: --rate-limit-sleep must be a non-negative integer (seconds)."
@@ -151,12 +173,49 @@ acquire_lock() {
     fi
   fi
   echo "$MAIN_PID" > "$LOCK_FILE"
+  start_heartbeat
+}
+
+# Heartbeat — liveness that survives a PID-namespace boundary.
+#
+# daily-scout.sh launches this script on the HOST (daily-scout.sh:127), while the
+# health probe runs inside the career-ops container. `kill -0 $pid` only resolves
+# pids in the caller's own namespace, so the container sees a host-launched
+# runner as dead and reports every one of its jobs "abandoned" — and would offer
+# to release a job that is actively running, duplicating ~6 minutes of work.
+#
+# Worker logs are no help either: provider CLI output is buffered, so the log
+# stays 0 bytes until the worker finishes. A file mtime is the one signal that
+# crosses namespaces, so touch one on a timer.
+HEARTBEAT_FILE="$BATCH_DIR/batch-runner.heartbeat"
+HEARTBEAT_PID=""
+
+start_heartbeat() {
+  touch "$HEARTBEAT_FILE" 2>/dev/null || true
+  # stdin/stdout/stderr all closed, and disowned: a background job that inherits
+  # the script's stdout keeps the pipe open, so `out=$(./batch-runner.sh)` blocks
+  # until the ticker dies instead of returning when the script exits.
+  (
+    while :; do
+      sleep 30
+      touch "$HEARTBEAT_FILE" 2>/dev/null || exit 0
+    done
+  ) </dev/null >/dev/null 2>&1 &
+  HEARTBEAT_PID=$!
+  disown "$HEARTBEAT_PID" 2>/dev/null || true
+}
+
+stop_heartbeat() {
+  [[ -n "$HEARTBEAT_PID" ]] && kill "$HEARTBEAT_PID" 2>/dev/null || true
+  HEARTBEAT_PID=""
+  rm -f "$HEARTBEAT_FILE" 2>/dev/null || true
 }
 
 release_lock() {
   if [[ "${BASHPID:-$$}" != "$MAIN_PID" ]]; then
     return
   fi
+  stop_heartbeat
   rm -f "$LOCK_FILE"
 }
 
@@ -174,12 +233,47 @@ check_prerequisites() {
     exit 1
   fi
 
-  if ! command -v claude &>/dev/null; then
-    echo "ERROR: 'claude' CLI not found in PATH."
+  if ! provider_check_available; then
+    echo "ERROR: '$(provider_display_name)' CLI not found in PATH."
+    echo "       Provider is set to '$PROVIDER_NAME'. Install the CLI or change the provider."
     exit 1
   fi
 
   mkdir -p "$LOGS_DIR" "$TRACKER_DIR" "$REPORTS_DIR"
+}
+
+# Verify the container's CLI session BEFORE touching the queue. Without this a
+# logged-out CLI marks every offer "failed" one by one, silently draining each
+# offer's retry budget on a condition only the operator can fix.
+check_auth() {
+  # Some providers (e.g. qwen) cannot pre-flight auth — provider_check_auth
+  # returns 1 only when it can positively confirm "not authenticated".
+  local auth_rc=0
+  provider_check_auth || auth_rc=$?
+  if (( auth_rc == 0 )); then
+    return 0
+  fi
+
+  local display
+  display=$(provider_display_name)
+  local hint
+  hint=$(provider_auth_fix_hint)
+  # 3 = the credentials work but the plan's quota is spent. Pausing is right;
+  # "log in again" is not.
+  if (( auth_rc == 3 )); then
+    echo "ERROR: the '$display' quota is exhausted. No offers were processed; the queue is untouched."
+    echo "       Fix: switch provider in the web UI (header model picker) or wait for the quota to reset."
+    printf 'auth\t-\t%s quota exhausted - switch provider in the web UI or wait for the reset\n' "$display" > "$PAUSE_FILE"
+    exit 2
+  fi
+  echo "ERROR: the '$display' CLI is not authenticated."
+  echo "       No offers were processed; the queue is untouched."
+  echo ""
+  echo "       Fix: $hint"
+  echo ""
+  echo "       Then re-run the batch."
+  printf 'auth\t-\t%s CLI not authenticated - run: %s\n' "$display" "$hint" > "$PAUSE_FILE"
+  exit 2
 }
 
 # Status/watch mode only needs prior batch state, not worker prerequisites.
@@ -274,27 +368,31 @@ run_with_state_lock() {
   return "$status"
 }
 
+# An offer's identity is the (id, url) pair, never the id alone. Producers such
+# as daily-scout.sh rewrite batch-input.tsv with ids restarting at 1, so a bare
+# id lookup would inherit the status of whatever unrelated offer last held that
+# id and skip the new one as already done.
 # Get status of an offer from state file
 get_status() {
-  local id="$1"
+  local id="$1" url="$2"
   if [[ ! -f "$STATE_FILE" ]]; then
     echo "none"
     return
   fi
   local status
-  status=$(awk -F'\t' -v id="$id" '$1 == id { print $3 }' "$STATE_FILE")
+  status=$(awk -F'\t' -v id="$id" -v url="$url" '$1 == id && $2 == url { print $3 }' "$STATE_FILE" | tail -1)
   echo "${status:-none}"
 }
 
 # Get retry count for an offer
 get_retries() {
-  local id="$1"
+  local id="$1" url="$2"
   if [[ ! -f "$STATE_FILE" ]]; then
     echo "0"
     return
   fi
   local retries
-  retries=$(awk -F'\t' -v id="$id" '$1 == id { print $9 }' "$STATE_FILE")
+  retries=$(awk -F'\t' -v id="$id" -v url="$url" '$1 == id && $2 == url { print $9 }' "$STATE_FILE" | tail -1)
   echo "${retries:-0}"
 }
 
@@ -345,7 +443,7 @@ update_state_unlocked() {
   # Process existing lines
   while IFS=$'\t' read -r sid surl sstatus sstarted scompleted sreport sscore serror sretries; do
     [[ "$sid" == "id" ]] && continue  # skip header
-    if [[ "$sid" == "$id" ]]; then
+    if [[ "$sid" == "$id" && "$surl" == "$url" ]]; then
       printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
         "$id" "$url" "$status" "$started" "$completed" "$report_num" "$score" "$error" "$retries" >> "$tmp"
       found=true
@@ -374,7 +472,18 @@ is_rate_limit_log() {
 
 is_session_limit_log() {
   local log_file="$1"
-  grep -Eiq '(session limit|resets [0-9:]+[ap]m|usage limit|limit[[:space:]]+reached)' "$log_file"
+  # An exhausted plan quota belongs here, not with transient 429s: it will not
+  # clear in 300s, and treating it as a rate limit cost ~3h per job while Qwen's
+  # token plan was empty (jobs 246-250, 2026-09-12..15).
+  grep -Eiq '(session limit|resets [0-9:]+[ap]m|usage limit|limit[[:space:]]+reached|quota[^.]*exhausted|insufficient_quota|exceeded your current quota)' "$log_file"
+}
+
+# An unauthenticated CLI fails every worker identically, so it is an operator
+# problem, not a bad offer. Treated like a session limit: pause, don't consume
+# the offer's retry budget.
+is_auth_failure_log() {
+  local log_file="$1"
+  provider_is_auth_failure_log "$log_file"
 }
 
 mark_paused_rate_limit() {
@@ -407,21 +516,55 @@ reserve_report_num() {
 process_offer() {
   local id="$1" url="$2" source="$3" notes="$4"
 
+  # A CV request (MCP generate_cv → ingest /cv) is marked in the notes column:
+  #   [cv:force]            full evaluation, and the CV is built whatever the score
+  #   [cv:only report=NNN]  no re-evaluation: tailor a CV from existing report NNN
+  local cv_mode="" cv_report=""
+  local cv_only_re='\[cv:only report=([0-9]+)\]'
+  if [[ "$notes" =~ $cv_only_re ]]; then
+    cv_mode="only"
+    cv_report="${BASH_REMATCH[1]}"
+  elif [[ "$notes" == *"[cv:force]"* ]]; then
+    cv_mode="force"
+  fi
+
   local started_at
   started_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
   local retries
-  retries=$(get_retries "$id")
-  local report_num
-  report_num=$(reserve_report_num "$id" "$url" "$started_at" "$retries")
+  retries=$(get_retries "$id" "$url")
+  local report_num report_file=""
+  if [[ "$cv_mode" == "only" ]]; then
+    # The report already exists; reserving a fresh number would orphan it.
+    report_num="$cv_report"
+    for candidate_report in "$REPORTS_DIR/$report_num"-*.md; do
+      [[ -f "$candidate_report" ]] && { report_file="$candidate_report"; break; }
+    done
+    if [[ -z "$report_file" ]]; then
+      # report_num stays "-": a number recorded here would feed next_report_num.
+      update_state "$id" "$url" "failed" "$started_at" "$started_at" "-" "-" "CV requested for report $report_num, but reports/$report_num-*.md does not exist" "$MAX_RETRIES"
+      echo "    ❌ CV request #$id: report $report_num not found"
+      return 0
+    fi
+    update_state "$id" "$url" "processing" "$started_at" "-" "$report_num" "-" "-" "$retries"
+  else
+    report_num=$(reserve_report_num "$id" "$url" "$started_at" "$retries")
+  fi
   local date
   date=$(date +%Y-%m-%d)
   local jd_file="/tmp/batch-jd-${id}.txt"
 
-  echo "--- Processing offer #$id: $url (report $report_num, attempt $((retries + 1)))"
+  if [[ "$cv_mode" == "only" ]]; then
+    echo "--- CV only for offer #$id: report $report_num, $url (attempt $((retries + 1)))"
+  else
+    echo "--- Processing offer #$id: $url (report $report_num, attempt $((retries + 1)))${cv_mode:+ [CV forced]}"
+  fi
 
   # Build the prompt with placeholders replaced
-  local prompt
-  if [[ "$SKIP_PDF" == "true" ]]; then
+  local prompt template="$PROMPT_FILE"
+  if [[ "$cv_mode" == "only" ]]; then
+    template="$CV_PROMPT_FILE"
+    prompt="Genera SOLO el CV a medida para una oferta ya evaluada (no re-evalúes, no escribas report nuevo ni línea de tracker). Report: ${report_file#$PROJECT_DIR/}"
+  elif [[ "$SKIP_PDF" == "true" && "$cv_mode" != "force" ]]; then
     prompt="Procesa esta oferta de empleo. Ejecuta el pipeline: evaluación A-F + report .md + tracker line. NO generes PDF; en el tracker escribe ❌ en la columna PDF y en el JSON final establece \"pdf\": null."
     echo "    ⏭️  --skip-pdf set — skipping PDF generation for #$id ($url)"
   else
@@ -432,8 +575,14 @@ process_offer() {
   prompt="$prompt Report number: $report_num"
   prompt="$prompt Date: $date"
   prompt="$prompt Batch ID: $id"
+  if [[ "$cv_mode" == "force" ]]; then
+    # The user asked for this CV explicitly. The score gate exists to avoid
+    # unused PDFs; a CV somebody asked for is by definition not unused.
+    prompt="$prompt FORCE_CV: the user explicitly asked for the CV for this role. In Paso 4 IGNORE the auto_pdf_score_threshold gate and ALWAYS generate the PDF. Keep the score and recommendation honest; do not inflate them to justify the CV."
+  fi
 
   local log_file="$LOGS_DIR/${report_num}-${id}.log"
+  [[ "$cv_mode" == "only" ]] && log_file="$LOGS_DIR/cv-${report_num}-${id}.log"
 
   # Pre-fetch the JD so the worker gets real content even for SPA pages its
   # WebFetch can't render (Workday/Ashby/custom React). `local:jds/` → use the
@@ -463,13 +612,16 @@ process_offer() {
   esc_report_num="${report_num//|/\\|}"
   esc_date="${date//|/\\|}"
   esc_id="${id//|/\\|}"
+  local esc_report_file="${report_file#$PROJECT_DIR/}"
+  esc_report_file="${esc_report_file//|/\\|}"
   sed \
+    -e "s|{{REPORT_FILE}}|${esc_report_file}|g" \
     -e "s|{{URL}}|${esc_url}|g" \
     -e "s|{{JD_FILE}}|${esc_jd_file}|g" \
     -e "s|{{REPORT_NUM}}|${esc_report_num}|g" \
     -e "s|{{DATE}}|${esc_date}|g" \
     -e "s|{{ID}}|${esc_id}|g" \
-    "$PROMPT_FILE" > "$resolved_prompt"
+    "$template" > "$resolved_prompt"
 
   # Inject user-layer personalization into the temporary worker prompt.
   # The resolved prompt is gitignored runtime state, so user profile data stays
@@ -485,18 +637,10 @@ process_offer() {
     fi
   done
 
-  # Launch claude -p worker.
-  # Model defaults to the Claude Max subscription default unless --model was
-  # passed. Building the command in an array keeps quoting safe regardless.
-  # --strict-mcp-config (with no --mcp-config) starts workers with no MCP
-  # servers: they only evaluate offers and need none. Without it each parallel
-  # worker inherits the parent session's MCP (e.g. Playwright) and they deadlock
-  # fighting over the single shared browser when --parallel > 1 (issue #506).
-  local -a claude_args=(-p --dangerously-skip-permissions --strict-mcp-config)
-  if [[ -n "$MODEL" ]]; then
-    claude_args+=(--model "$MODEL")
-  fi
-  claude_args+=(--append-system-prompt-file "$resolved_prompt" "$prompt")
+  # Launch worker via provider adapter.
+  # The adapter handles CLI-specific flags (Claude: --dangerously-skip-permissions
+  # --strict-mcp-config --append-system-prompt-file; Qwen: --safe-mode + stdin).
+  # Model defaults to the provider's default unless --model was passed.
 
   local exit_code=0
   local terminal_failure_recorded=false
@@ -504,18 +648,26 @@ process_offer() {
   local max_shim_retries=4
   while true; do
     exit_code=0
-    claude "${claude_args[@]}" > "$log_file" 2>&1 || exit_code=$?
+    provider_invoke "$resolved_prompt" "$prompt" "$log_file" || exit_code=$?
 
     if [[ $exit_code -eq 0 ]]; then
       break
     fi
 
-    # Check for Claude Code npm shim swap (exit code 127 + command not found)
-    if [[ $exit_code -eq 127 ]] && grep -qE "(claude: command not found|claude:.*not found|cannot find.*claude)" "$log_file" && (( shim_retries < max_shim_retries )); then
+    # Check for CLI command not found (exit code 127) — npm shim swap or missing install
+    if [[ $exit_code -eq 127 ]] && grep -qE "(command not found|not found|cannot find)" "$log_file" && (( shim_retries < max_shim_retries )); then
       shim_retries=$((shim_retries + 1))
-      echo "    ⏳ Claude command not found (shim swap detected). Retrying in 30s (attempt $shim_retries/$max_shim_retries)..."
+      echo "    ⏳ $(provider_display_name) command not found (shim swap detected). Retrying in 30s (attempt $shim_retries/$max_shim_retries)..."
       sleep 30
       continue
+    fi
+
+    if is_auth_failure_log "$log_file"; then
+      mark_paused_rate_limit "$id" "$url" "$started_at" "$report_num" "$retries" "$log_file"
+      echo "    🔑 $(provider_display_name) CLI is not authenticated; pausing batch without consuming retry budget."
+      echo "       Fix: $(provider_auth_fix_hint)"
+      terminal_failure_recorded=true
+      break
     fi
 
     if is_session_limit_log "$log_file"; then
@@ -550,6 +702,23 @@ process_offer() {
   local completed_at
   completed_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
+  if [[ $exit_code -eq 0 && "$cv_mode" == "only" ]]; then
+    # Success is a PDF on disk, never the worker's word for it.
+    local cv_pdf
+    cv_pdf=$(sed -nE 's/.*"pdf":[[:space:]]*"([^"]+\.pdf)".*/\1/p' "$log_file" 2>/dev/null | tail -1 || true)
+    cv_pdf="${cv_pdf#/app/}"
+    local cv_score
+    cv_score=$(sed -nE 's/^score:[[:space:]]*([0-9.]+).*/\1/p' "$report_file" 2>/dev/null | head -1 || true)
+    if [[ -n "$cv_pdf" && -s "$PROJECT_DIR/$cv_pdf" ]]; then
+      update_state "$id" "$url" "completed" "$started_at" "$completed_at" "$report_num" "${cv_score:--}" "-" "$retries"
+      echo "    ✅ CV built: $cv_pdf (report $report_num)"
+    else
+      update_state "$id" "$url" "failed" "$started_at" "$completed_at" "$report_num" "${cv_score:--}" "CV worker exited 0 but no PDF exists${cv_pdf:+ at $cv_pdf}" "$retries"
+      echo "    ❌ CV worker reported success but no PDF was written"
+    fi
+    return 0
+  fi
+
   if [[ $exit_code -eq 0 ]]; then
     # Try to extract score from worker output
     local score="-"
@@ -559,8 +728,8 @@ process_offer() {
       score="$score_match"
     fi
 
-    # Check min-score gate
-    if is_decimal_number "$score" && awk -v min="$MIN_SCORE" 'BEGIN{exit !(min > 0)}'; then
+    # Check min-score gate (never for a CV the user asked for)
+    if [[ "$cv_mode" != "force" ]] && is_decimal_number "$score" && awk -v min="$MIN_SCORE" 'BEGIN{exit !(min > 0)}'; then
       if awk -v score="$score" -v min="$MIN_SCORE" 'BEGIN{exit !(score < min)}'; then
         update_state "$id" "$url" "skipped" "$started_at" "$completed_at" "$report_num" "$score" "below-min-score" "$retries"
         echo "    ⏭️  Skipped (score: $score < min-score: $MIN_SCORE)"
@@ -580,14 +749,37 @@ process_offer() {
         [[ -f "$candidate_report" ]] && { report_glob_found="$candidate_report"; break; }
       done
     fi
+    # A worker that resolves the relative "reports/" path against some other cwd
+    # writes a perfectly good report somewhere the check above cannot see (that
+    # is how reports 141/206/207 were lost). Before throwing the evaluation
+    # away, look for it elsewhere in the project and rescue it into REPORTS_DIR.
+    if [[ -z "$report_glob_found" && -n "$report_num" && "$report_num" != "-" ]]; then
+      local stray_report
+      stray_report=$(find "$PROJECT_DIR" -path "$REPORTS_DIR" -prune -o \
+        -type f -name "$report_num-*.md" -print 2>/dev/null | head -1)
+      if [[ -n "$stray_report" ]]; then
+        if mv "$stray_report" "$REPORTS_DIR/"; then
+          report_glob_found="$REPORTS_DIR/$(basename "$stray_report")"
+          echo "    ⚠️  Report was written to ${stray_report#$PROJECT_DIR/} instead of reports/ — rescued"
+        fi
+      fi
+    fi
     if [[ -z "$report_glob_found" ]]; then
       update_state "$id" "$url" "failed" "$started_at" "$completed_at" "$report_num" "$score" "worker exited 0 but wrote no report ${report_num}-*.md" "$retries"
       echo "    ❌ Failed: worker reported success (score: $score, report: $report_num) but no report file was written"
       return 0
     fi
 
-    update_state "$id" "$url" "completed" "$started_at" "$completed_at" "$report_num" "$score" "-" "$retries"
-    echo "    ✅ Completed (score: $score, report: $report_num)"
+    local done_note="-"
+    if [[ "$cv_mode" == "force" ]]; then
+      local forced_pdf
+      forced_pdf=$(sed -nE 's/^\*\*PDF:\*\*[[:space:]]*(output\/[^[:space:]]+\.pdf).*/\1/p' "$report_glob_found" 2>/dev/null | head -1 || true)
+      if [[ -z "$forced_pdf" || ! -s "$PROJECT_DIR/$forced_pdf" ]]; then
+        done_note="evaluated, but the requested CV was NOT produced - retry with generate_cv"
+      fi
+    fi
+    update_state "$id" "$url" "completed" "$started_at" "$completed_at" "$report_num" "$score" "$done_note" "$retries"
+    echo "    ✅ Completed (score: $score, report: $report_num)${cv_mode:+ [CV forced]}"
   elif [[ "$terminal_failure_recorded" == "false" ]]; then
     if (( retries < MAX_RETRIES )); then
       retries=$((retries + 1))
@@ -776,6 +968,7 @@ main() {
   if [[ "$DRY_RUN" == "false" ]]; then
     acquire_lock
     rm -f "$PAUSE_FILE"
+    check_auth
   fi
 
   init_state
@@ -818,7 +1011,7 @@ main() {
     fi
 
     local status
-    status=$(get_status "$id")
+    status=$(get_status "$id" "$url")
 
     if [[ "$RESUME_PAUSED" == "true" ]]; then
       if [[ "$status" != "paused_rate_limit" ]]; then
@@ -831,7 +1024,7 @@ main() {
       fi
       # Check retry limit
       local retries
-      retries=$(get_retries "$id")
+      retries=$(get_retries "$id" "$url")
       if (( retries >= MAX_RETRIES )); then
         echo "SKIP #$id: max retries ($MAX_RETRIES) reached"
         continue
@@ -848,7 +1041,7 @@ main() {
       # Skip failed offers that hit retry limit (unless --retry-failed)
       if [[ "$status" == "failed" ]]; then
         local retries
-        retries=$(get_retries "$id")
+        retries=$(get_retries "$id" "$url")
         if (( retries >= MAX_RETRIES )); then
           echo "SKIP #$id: failed and max retries reached (use --retry-failed to force)"
           continue
@@ -882,7 +1075,7 @@ main() {
     echo "=== DRY RUN (no processing) ==="
     for i in "${!pending_ids[@]}"; do
       local status
-      status=$(get_status "${pending_ids[$i]}")
+      status=$(get_status "${pending_ids[$i]}" "${pending_urls[$i]}")
       echo "  #${pending_ids[$i]}: ${pending_urls[$i]} [${pending_sources[$i]}] (status: $status)"
     done
     echo ""

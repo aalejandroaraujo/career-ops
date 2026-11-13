@@ -87,10 +87,12 @@
   \RequirePackage[utf8]{inputenc}
   \RequirePackage[T1]{fontenc}
   \input{glyphtounicode}
-  \pdfglyphtounicode{f_f}{FB00}
-  \pdfglyphtounicode{f_f_i}{FB03}
-  \pdfglyphtounicode{f_f_l}{FB04}
-  \pdfglyphtounicode{f_i}{FB01}
+  \pdfglyphtounicode{f_f}{0066 0066}
+  \pdfglyphtounicode{f_f_i}{0066 0066 0069}
+  \pdfglyphtounicode{f_f_l}{0066 0066 006C}
+  \pdfglyphtounicode{f_i}{0066 0069}
+  \pdfglyphtounicode{f_l}{0066 006C}
+  \pdfglyphtounicode{hyphen}{002D}
   \pdfgentounicode=1
 \fi
 
@@ -120,7 +122,7 @@
 \newcommand{\cvRatingMarker}{\faCircle}
 \let\itemmarker\cvItemMarker      % for backward compatibility
 \let\ratingmarker\cvRatingMarker  % for backward compatibility
-\newcommand{\cvDateMarker}{\faCalendar[regular]}
+\newcommand{\cvDateMarker}{\faCalendar}
 \newcommand{\cvLocationMarker}{\faMapMarker}
 \newcommand{\locationname}{Location}
 \newcommand{\datename}{Date}
@@ -170,12 +172,12 @@
 \NewDocumentCommand{\printinfo}{o m m o}{%
   \IfNoValueTF{#4}{%
     \mbox{\textcolor{accent}%
-    {\BeginAccSupp{method=escape,ActualText={\IfNoValueTF{#1}{\detokenize{#2}}{#1}:\space}}\normalfont #2\EndAccSupp{}}%
+    {\BeginAccSupp{method=escape,ActualText={\IfNoValueTF{#1}{}{#1:\space}}}\normalfont #2\EndAccSupp{}}%
     ~\utffriendlydetokenize{#3}\hspace{2em}}%
   }{% v1.7.4: fix accsupp ActualText bugs when withhyper enabled
     \iftoggle{withhyper}{%
       \mbox{\textcolor{accent}%
-      {\BeginAccSupp{method=escape,ActualText={\IfNoValueTF{#1}{\detokenize{#2}}{#1}:\space}}\normalfont #2\EndAccSupp{}}%
+      {\BeginAccSupp{method=escape,ActualText={\IfNoValueTF{#1}{}{#1:\space}}}\normalfont #2\EndAccSupp{}}%
       ~%
       \BeginAccSupp{method=escape,ActualText={#4}}%
       \href{#4}{\utffriendlydetokenize{#3}}%
@@ -184,7 +186,7 @@
      }{%
        \ClassWarning{Please specify [withhyper] option to enable hyperlinks. Printing out full hyperlink prefix #1 for now.}%
       \mbox{\textcolor{accent}
-      {\BeginAccSupp{method=escape,ActualText={\IfNoValueTF{#1}{\detokenize{#2}}{#1}:\space}}\normalfont #2\EndAccSupp{}}%
+      {\BeginAccSupp{method=escape,ActualText={\IfNoValueTF{#1}{}{#1:\space}}}\normalfont #2\EndAccSupp{}}%
       ~{\utffriendlydetokenize{#4}}\hspace{2em}}%
     }%
   }%
@@ -345,7 +347,7 @@
 % v1.7: adds accsupp for the icon as well
 \newcommand{\cvachievement}[3]{%
   \begin{tabularx}{\linewidth}{@{}p{2em} @{\hspace{1ex}} >{\raggedright\arraybackslash}X@{}}
-  \multirow{2}{*}{\LARGE\color{accent}\BeginAccSupp{method=escape,ActualText={#1: }}#1\EndAccSupp{}} & \bfseries\textcolor{emphasis}{#2}\\
+  \multirow{2}{*}{\LARGE\color{accent}\BeginAccSupp{method=escape,ActualText={}}#1\EndAccSupp{}} & \bfseries\textcolor{emphasis}{#2}\\
   & #3
   \end{tabularx}%
   \smallskip
