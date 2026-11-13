@@ -231,8 +231,31 @@ function firstMatch(patterns, text = '') {
   return patterns.find((pattern) => pattern.test(text));
 }
 
-function hasApplyControl(controls = []) {
-  return controls.some((control) => APPLY_PATTERNS.some((pattern) => pattern.test(control)));
+/**
+ * Normalize an apply control: plain label strings (API callers, older tests) or
+ * the objects liveness-browser.mjs collects.
+ */
+function asControl(control) {
+  return typeof control === 'string'
+    ? { label: control, inChrome: false, offDomain: false, buttonStyled: true, selector: null }
+    : { inChrome: false, offDomain: false, buttonStyled: false, selector: null, ...control, label: String(control?.label || '') };
+}
+
+/**
+ * First control that counts as an apply control, or null. A control inside
+ * nav/header/footer only counts when it is button-styled or leads off-domain
+ * (the "Jetzt bewerben" bar pattern) — a plain "Apply" nav link to a job search
+ * does not.
+ */
+function findApplyControl(controls = []) {
+  for (const raw of controls) {
+    const control = asControl(raw);
+    const pattern = APPLY_PATTERNS.find((p) => p.test(control.label)) || APPLY_TEXT_PATTERNS.find((p) => p.test(control.label));
+    if (!pattern) continue;
+    if (control.inChrome && !control.buttonStyled && !control.offDomain) continue;
+    return { control, pattern };
+  }
+  return null;
 }
 
 export function classifyLiveness({ status = 0, finalUrl = '', bodyText = '', applyControls = [] } = {}) {
@@ -262,8 +285,16 @@ export function classifyLiveness({ status = 0, finalUrl = '', bodyText = '', app
     return { result: 'expired', code: 'expired_body', reason: `pattern matched: ${expiredBody.source}` };
   }
 
-  if (hasApplyControl(applyControls)) {
-    return { result: 'active', code: 'apply_control_visible', reason: 'visible apply control detected' };
+  const hit = findApplyControl(applyControls);
+  if (hit) {
+    const where = [hit.control.inChrome && 'in page chrome', hit.control.offDomain && 'off-domain', !hit.control.buttonStyled && 'plain link'].filter(Boolean).join(', ');
+    return {
+      result: 'active',
+      code: 'apply_control_visible',
+      reason: `visible apply control detected: "${hit.control.label.slice(0, 40)}"${where ? ` (${where})` : ''}`,
+      apply_control_present: true,
+      matched: { via: 'control', selector: hit.control.selector, label: hit.control.label.slice(0, 80), href: hit.control.href || null, pattern: hit.pattern.source },
+    };
   }
 
   const listingPage = firstMatch(LISTING_PAGE_PATTERNS, bodyText);
@@ -275,5 +306,20 @@ export function classifyLiveness({ status = 0, finalUrl = '', bodyText = '', app
     return { result: 'expired', code: 'insufficient_content', reason: 'insufficient content — likely nav/footer only' };
   }
 
-  return { result: 'uncertain', code: 'no_apply_control', reason: 'content present but no visible apply control found' };
+  // A posting with full content whose text carries an apply string ("Jetzt
+  // bewerben", "Apply now", "Postuler") is live: the control exists even when
+  // it renders behind JS or outside the elements we scan. Hard-expired banners
+  // and listing pages were ruled out above.
+  const applyText = firstMatch(APPLY_TEXT_PATTERNS, bodyText);
+  if (applyText) {
+    return {
+      result: 'active',
+      code: 'apply_text_present',
+      reason: `apply string in page text: ${applyText.source}`,
+      apply_control_present: true,
+      matched: { via: 'text', selector: null, label: bodyText.match(applyText)?.[0]?.trim() || null, href: null, pattern: applyText.source },
+    };
+  }
+
+  return { result: 'uncertain', code: 'no_apply_control', reason: 'content present but no visible apply control found', apply_control_present: false };
 }
