@@ -1,9 +1,9 @@
 candidate:
   full_name: "Test Candidate"
   level: "Senior Architect"
-  birthyear: 1976
+  birthyear: 1980
 compensation:
-  target_range: "CHF 150K–230K total (FTE)"
+  target_range: "CHF 120K–180K total (FTE)"
 industries:
   financial_services: ["Example Insurance AG", "Example Bank"]
   energy_utilities: ["Example Grid AG"]

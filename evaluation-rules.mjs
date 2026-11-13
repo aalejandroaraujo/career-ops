@@ -250,7 +250,7 @@ const kchf = (s) => {
   return n < 1000 ? n * 1000 : n;
 };
 
-/** Target band from profile.yml compensation.target_range ("CHF 150K–230K total ..."). */
+/** Target band from profile.yml compensation.target_range ("CHF 120K–180K total ..."). */
 export function targetBand(profile) {
   const raw = String(profile?.compensation?.target_range || '');
   const m = raw.match(/(\d{2,3}(?:[.,]\d)?)\s*K?\s*[–—-]\s*(\d{2,3}(?:[.,]\d)?)\s*K/i);

@@ -165,13 +165,13 @@ eq(tc.total, { min: 115000 + 9200 + tc.pension_delta.min, max: 135000 + 10800 + 
 eq(tc.mobile_office, 'yes', 'mobile office stated');
 eq(tc.assumptions.length, 2, 'every inferred number is listed as an assumption');
 eq(totalComp({ min: 100000, max: 100000 }, {}, { age: 40 }).total, { min: 100000, max: 100000 }, 'no benefits → total = base');
-eq(targetBand({ compensation: { target_range: 'CHF 150K–230K total (FTE)' } }), { min: 150000, max: 230000, basis: 'total' }, 'target band parsed from profile');
-const band = { min: 150000, max: 230000 };
-eq([compScoreFromTotal({ min: 240000, max: 260000 }, band), compScoreFromTotal({ min: 195000, max: 215000 }, band), compScoreFromTotal({ min: 150000, max: 170000 }, band), compScoreFromTotal({ min: 130000, max: 145000 }, band)], [5, 4.5, 3.5, 2.5], 'comp scored on total vs band');
-const compReport = report.replace('next_action:', 'comp:\n  base_min: 115000\n  base_max: 135000\nnext_action:').replace('| Comp | 2.5/5 |', '| Comp | 3.5/5 |');
-const ce = enforceReport(compReport, { record: { ...directHire, benefits: { bonus: 'Bonus', pension_employer_share: 60 } }, profile: { ...profile, compensation: { target_range: 'CHF 150K–230K total (FTE)' }, candidate: { ...profile.candidate, birthyear: 1976 } } });
+eq(targetBand({ compensation: { target_range: 'CHF 120K–180K total (FTE)' } }), { min: 120000, max: 180000, basis: 'total' }, 'target band parsed from profile');
+const band = { min: 120000, max: 180000 };
+eq([compScoreFromTotal({ min: 190000, max: 200000 }, band), compScoreFromTotal({ min: 155000, max: 165000 }, band), compScoreFromTotal({ min: 125000, max: 135000 }, band), compScoreFromTotal({ min: 110000, max: 118000 }, band)], [5, 4.5, 3.5, 2.5], 'comp scored on total vs band');
+const compReport = report.replace('next_action:', 'comp:\n  base_min: 115000\n  base_max: 135000\nnext_action:').replace('| Comp | 2.5/5 |', '| Comp | 2.0/5 |');
+const ce = enforceReport(compReport, { record: { ...directHire, benefits: { bonus: 'Bonus', pension_employer_share: 60 } }, profile: { ...profile, compensation: { target_range: 'CHF 120K–180K total (FTE)' }, candidate: { ...profile.candidate, birthyear: 1980 } } });
 const cs = readSummary(ce.md);
-ok(cs.comp.total_min > cs.comp.base_min && cs.comp.target_min === 150000, 'summary carries base and total separately, with the target band');
+ok(cs.comp.total_min > cs.comp.base_min && cs.comp.target_min === 120000, 'summary carries base and total separately, with the target band');
 ok(ce.result.corrections.some((c) => /scored on total comp/.test(c)), 'comp dimension re-scored on total, not base');
 eq(ce.result.decision, 'apply', 'comp never changes the decision');
 
