@@ -203,6 +203,28 @@ const APPLY_PATTERNS = [
   /wyślij (cv|aplikacj)/i,
 ];
 
+/**
+ * Apply strings that count as an apply control when they appear in the page
+ * TEXT, whatever element renders them. Swiss/DACH ATS pages (Swiss Life,
+ * prospective.ch, refline) render "Jetzt bewerben" as a styled anchor to an
+ * off-domain form, which the button/link scan used to miss, leaving live
+ * postings `uncertain`. Shared with jd-intake.mjs so the canonical JD record and
+ * the liveness check agree on what an apply control is.
+ */
+export const APPLY_TEXT_PATTERNS = [
+  /\bjetzt bewerben\b/i,
+  /\bonline bewerben\b/i,
+  /\bhier bewerben\b/i,
+  /^\s*bewerben\s*$/im,
+  /\bapply now\b/i,
+  /\bapply for this (?:job|position|role)\b/i,
+  /^\s*apply\s*$/im,
+  /\bpostuler\b/i,
+  /\bcandidater?\b/i,
+  /\bcandidati ora\b/i,
+  /\bich bewerbe mich\b/i,
+];
+
 const MIN_CONTENT_CHARS = 300;
 
 function firstMatch(patterns, text = '') {

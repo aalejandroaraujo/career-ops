@@ -15,6 +15,17 @@ When the candidate pastes a **URL** (not JD text), confirm the posting is still 
 
 Do not continue to Block A until this gate is resolved. The snapshot captured here is reused by Block G's freshness signals.
 
+## Canonical JD record (all inputs)
+
+Whatever the input form (URL page text, pasted text, a PDF/.docx/.md/.txt file, a screenshot, a forwarded email), build the canonical JD record BEFORE Block A (reuse the record if `auto-pipeline` already built it) and evaluate only from it:
+
+```bash
+# save pasted/fetched text first (e.g. jds/{date}_{slug}.md), or pass the file the user gave
+node jd-intake.mjs <file> [--source url|paste|file|screenshot|email|batch] [--url <url>] --out /tmp/jd-record.json
+```
+
+`jd-intake.mjs` extracts PDFs with pdftotext, screenshots with OCR, and .docx/.eml natively, so the same JD yields the same record (same `content_hash`) in every form. Use its `employment_type`, `channel`, `language`, `requirements[].level` (required vs nice_to_have), `benefits` and `contact` fields as given; a `nice_to_have` requirement is never a hard stop. If a field is visibly wrong, correct it and say so in one line under Block A.
+
 ## Step 0 — Archetype Detection
 
 Classify the job into one of the 6 archetypes (see `_shared.md`). If it is a hybrid, indicate the 2 closest ones. This determines:

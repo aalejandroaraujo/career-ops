@@ -75,11 +75,34 @@ Application during the A-G evaluation:
 
 ## Pipeline (execute in order)
 
-### Paso 1 — Get JD
+### Paso 1 — Get the canonical JD record
 
-1. Read the JD file at `{{JD_FILE}}`
-2. If the file is empty or does not exist, try to get the JD from `{{URL}}` with WebFetch
-3. If both fail, report an error and finish
+Every rule below reads from ONE canonical JD record, so a JD gets the same
+treatment whether it arrived as a URL, pasted text, a PDF/.docx/.md file, a
+screenshot, a forwarded email or a scan row.
+
+1. If the orchestrator message names a `JD record:` path, read that JSON. It was
+   built by `jd-intake.mjs` and `{{JD_FILE}}` holds its extracted plain text.
+2. Otherwise build it yourself: if `{{JD_FILE}}` has content, run
+   `node jd-intake.mjs {{JD_FILE}} --url "{{URL}}" --out /tmp/jd-record-{{ID}}.json`
+   (omit `--url` for `local:` URLs). If the file is empty or missing, WebFetch
+   `{{URL}}`, save the page text to `{{JD_FILE}}`, then run the same command with
+   `--source url`.
+3. If no route yields at least 200 characters of JD text, report an error and finish.
+
+**Record fields you must use (do not re-derive them from the raw text):**
+`source_type`, `url`, `company`, `title`, `language`, `location`, `workload`,
+`employment_type` (direct_hire | contract_b2b | agency | unknown), `channel`
+(company_ats | aggregator | recruiter | referral), `responsibilities[]`,
+`requirements[]` (each `required` or `nice_to_have`), `benefits{bonus,
+pension_employer_share, vacation_days, mobile_office, other[]}`,
+`contact{name, role, channel}`, `apply_control_present`, `raw_text`.
+
+- A `nice_to_have` requirement (Soll-Kriterien, "von Vorteil", "nice to have",
+  "preferred") is NEVER a hard stop. Missing it is a soft gap at most.
+- You MAY correct a field the parser got visibly wrong (e.g. `title` picked up a
+  nav word). Say so in one line under Block A ("Record correction: ..."). Never
+  silently disagree with the record.
 
 ### Paso 2 — A-G Evaluation
 
