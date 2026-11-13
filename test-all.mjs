@@ -5694,6 +5694,7 @@ for (const suite of [
   'test-jd-intake.mjs',
   'test-evaluation-rules.mjs',
   'test-output-guards.mjs',
+  'test-build-verify.mjs',
 ]) {
   const suitePath = join(ROOT, suite);
   if (!existsSync(suitePath)) { warn(`${suite} not found — skipped`); continue; }
