@@ -16,6 +16,7 @@ import {
   OPEN_DATE_RANGE, headerRightMarginMm, nameFromTex, parsePdfinfo, parsePgm, unescapeLatex, verifyCvPdf,
 } from './cv-verify.mjs';
 import { APPLY_TEXT_PATTERNS, classifyLiveness } from './liveness-core.mjs';
+import { isBuildCommand, texFromCommand } from './cv-guardrails.mjs';
 
 let passed = 0;
 let failed = 0;
@@ -80,6 +81,13 @@ const r6 = classifyLiveness({ status: 200, bodyText: body, applyControls: ['Appl
 eq(r6.result, 'active', 'string controls (API callers) still work');
 const r7 = classifyLiveness({ status: 200, bodyText: body, applyControls: [] });
 eq([r7.result, r7.apply_control_present], ['uncertain', false], 'no control and no apply text → uncertain, apply_control_present false');
+
+console.log('\n4. CV guardrail hook fires only on real builds');
+ok(isBuildCommand('node build-cv-altacv.mjs /tmp/a.json output/x.tex'), 'plain build invocation detected');
+ok(isBuildCommand('cd /app && node /app/build-cv-altacv.mjs a.json o.tex && node generate-latex.mjs o.tex'), 'chained build with absolute path detected');
+ok(!isBuildCommand('git commit -m "build-cv-altacv.mjs now fills templates/cv-altacv.tex"'), 'commit message naming the builder does not trigger');
+ok(!isBuildCommand('grep -n photo build-cv-altacv.mjs'), 'grep over the builder does not trigger');
+eq(texFromCommand('cd /app && node /app/build-cv-altacv.mjs a.json o.tex'), '/app/o.tex', 'output .tex resolved against the cd target');
 
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);
