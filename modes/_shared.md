@@ -30,28 +30,23 @@ The files below are the **ONLY** sources for user-facing content (CV, cover lett
 
 ---
 
-## Scoring System
+## Scoring System — Fit vs Deal
 
-The evaluation uses 6 blocks (A-F) with a global score of 1-5:
+Two scores, never one blended number:
 
-| Dimension | What it measures |
-|-----------|-----------------|
-| Match con CV | Skills, experience, proof points alignment |
-| North Star alignment | How well the role fits the user's target archetypes (from _profile.md) |
-| Comp | Salary vs market (5=top quartile, 1=well below) |
-| Cultural signals | Company culture, growth, stability, remote policy |
-| Red flags | Blockers, warnings (negative adjustments) |
-| **Global** | Weighted average of above |
+| Score | Dimensions | Drives |
+|-------|------------|--------|
+| **fit_score** | CV match, North Star alignment (from `_profile.md`), minus red flags | **decision**: ≥ 4.0 `apply` · 3.0-3.9 `consider` · < 3.0 `skip`; any hard stop → `skip` |
+| **deal_score** | Comp (5 = top quartile), cultural signals, risk (5 = low) | **priority**: ≥ 4.0 `high` · 3.0-3.9 `medium` · < 3.0 `low`, plus the negotiation block. Never the decision |
 
-**Score interpretation:**
-- 4.5+ → Strong match, recommend applying immediately
-- 4.0-4.4 → Good match, worth applying
-- 3.5-3.9 → Decent but not ideal, apply only if specific reason
-- Below 3.5 → Recommend against applying (see Ethical Use in AGENTS.md)
+- Comp, title band, process friction and posting doubts are Deal, never Fit.
+- A hard stop is a `required` item with no direct or adjacent evidence, or a mandatory language level above the candidate's. `nice_to_have` items and an unstated language level are soft gaps.
+- `evaluation-rules.mjs enforce <report> --record <jd-record> --write` recomputes fit, deal, decision, priority and `next_action` from the dimension scores and the canonical JD record. Every evaluation path runs it. Plain-language policy: `docs/evaluation-rules.md`.
+- Ethical-use gate: below fit 4.0, recommend against applying unless the user has a specific reason (see AGENTS.md).
 
 ## Posting Legitimacy (Block G)
 
-Block G assesses whether a posting is likely a real, active opening. It does NOT affect the 1-5 global score -- it is a separate qualitative assessment.
+Block G assesses whether a posting is likely a real, active opening. It does NOT affect fit or deal -- it is a separate qualitative assessment.
 
 **Three tiers:**
 - **High Confidence** -- Real, active opening (most signals positive)

@@ -13,7 +13,7 @@
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 
-/** @type {Map<string, {mtimeMs:number, url:string|null, url_note:string|null, decision:string|null}>} */
+/** @type {Map<string, {mtimeMs:number, url:string|null, url_note:string|null, decision:string|null, priority:string|null}>} */
 const cache = new Map();
 
 /**
@@ -40,19 +40,19 @@ export function findReportFile(dir, reportNum) {
  *
  * @param {string} dir - Reports directory.
  * @param {string|null|undefined} reportField - Tracker cell, e.g. `[235](../reports/235-x.md)`.
- * @returns {{num:string|null, url:string|null, url_note:string|null, decision:string|null}}
+ * @returns {{num:string|null, url:string|null, url_note:string|null, decision:string|null, priority:string|null}}
  */
 export function reportMeta(dir, reportField) {
   const num = String(reportField || '').match(/\[(\d+)\]/)?.[1] || null;
-  if (!num) return { num: null, url: null, url_note: null, decision: null };
+  if (!num) return { num: null, url: null, url_note: null, decision: null, priority: null };
   const file = findReportFile(dir, num);
-  if (!file) return { num, url: null, url_note: 'report file not found', decision: null };
+  if (!file) return { num, url: null, url_note: 'report file not found', decision: null, priority: null };
 
   try {
     const { mtimeMs } = statSync(file);
     const hit = cache.get(num);
     if (hit && hit.mtimeMs === mtimeMs) {
-      return { num, url: hit.url, url_note: hit.url_note, decision: hit.decision };
+      return { num, url: hit.url, url_note: hit.url_note, decision: hit.decision, priority: hit.priority };
     }
 
     const md = readFileSync(file, 'utf8');
@@ -62,10 +62,13 @@ export function reportMeta(dir, reportField) {
     // live link — say which, rather than a bare "no link" that reads like a bug
     // (RED Global, report 205).
     const url_note = url ? null : (raw ? `filed capture: ${raw}` : 'no URL recorded in the report');
+    // final_decision is the legacy mirror evaluation-rules.mjs keeps in sync with
+    // `decision`; priority comes from the deal score (high | medium | low).
     const decision = md.match(/^final_decision:\s*"?([^"\n]+)"?/m)?.[1]?.trim() || null;
-    cache.set(num, { mtimeMs, url, url_note, decision });
-    return { num, url, url_note, decision };
+    const priority = md.match(/^priority:\s*"?([^"\n]+)"?/m)?.[1]?.trim() || null;
+    cache.set(num, { mtimeMs, url, url_note, decision, priority });
+    return { num, url, url_note, decision, priority };
   } catch {
-    return { num, url: null, url_note: null, decision: null };
+    return { num, url: null, url_note: null, decision: null, priority: null };
   }
 }

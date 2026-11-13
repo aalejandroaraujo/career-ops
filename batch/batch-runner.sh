@@ -794,6 +794,22 @@ process_offer() {
       return 0
     fi
 
+    # Rule-owned fields (fit/deal/decision/priority/next_action) are recomputed
+    # in code from the worker's dimension scores and the JD record, so they do
+    # not drift with the model. Idempotent; the worker already ran it once.
+    local enforce_args=(enforce "$report_glob_found" --write)
+    [[ -s "$jd_record" ]] && enforce_args+=(--record "$jd_record")
+    [[ -f "$TRACKER_DIR/$id.tsv" ]] && enforce_args+=(--tsv "$TRACKER_DIR/$id.tsv")
+    local enforced
+    if enforced=$(node "$PROJECT_DIR/evaluation-rules.mjs" "${enforce_args[@]}" 2>>"$log_file"); then
+      local fit_enforced
+      fit_enforced=$(sed -nE 's/.*"fit_score":([0-9.]+).*/\1/p' <<<"$enforced")
+      [[ -n "$fit_enforced" ]] && score="$fit_enforced"
+      echo "    ⚖️  Rules: $(sed -nE 's/.*"decision":"([a-z]+)".*"priority":"([a-z]+)".*/\1 · \2/p' <<<"$enforced") (fit $score)"
+    else
+      echo "    ⚠️  evaluation-rules enforce failed — report left as the worker wrote it"
+    fi
+
     local done_note="-"
     if [[ "$cv_mode" == "force" ]]; then
       local forced_pdf

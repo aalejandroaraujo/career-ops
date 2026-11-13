@@ -168,9 +168,13 @@ Read `cv.md`. Table with each JD requirement mapped to exact CV lines or i18n.ts
 
 #### Block C — Level and Strategy
 
-1. **Detected level** in the JD vs **candidate's natural level**
-2. **"Sell senior without lying" plan**: specific phrases, concrete achievements, founder as an advantage
-3. **"If they downlevel me" plan**: accept if comp is fair, 6-month review, clear criteria
+1. **Detected level** in the JD vs **candidate's natural level** (use `config/profile.yml` `candidate.level` when set). Record both in the Machine Summary `level:` map.
+2. **Overqualification / age-band read — check on EVERY JD**, not only when the title lacks a seniority prefix. When the detected level is below the candidate's level, add the soft gap `Overqualified / age-band read` with this mitigation:
+   - the About block states in ONE sentence why a builder/IC role is the deliberate choice (from `modes/_profile.md` exit narrative; never invented);
+   - Block F carries the verbatim answer to "Is this a step down for you?" and to "Why not a lead/architect role?".
+   `evaluation-rules.mjs` adds the gap if you miss it; write the mitigation anyway.
+3. **"Sell senior without lying" plan**: specific phrases, concrete achievements, founder as an advantage
+4. **"If they downlevel me" plan**: accept if comp is fair, 6-month review, clear criteria
 
 #### Block D — Comp and Demand
 
@@ -194,6 +198,8 @@ Top 5 changes to the CV + Top 5 changes to LinkedIn.
 **Selection adapted to the archetype.** Also include:
 - 1 recommended case study (which project to present and how)
 - Red-flag questions and how to answer them
+- **First-call script** (chuleta style: verbatim lines the candidate can read out, in the JD language when it is not English, at the candidate's stated level). Salary band and working-language questions live HERE, never in a pre-application email. One line each for: the band question, the working-language question, the availability answer, and the closing ask.
+- When the overqualification gap applies: verbatim answers to "Is this a step down for you?" and "Why not a lead/architect role?"
 
 #### Block G — Posting Legitimacy
 
@@ -211,43 +217,96 @@ Analyze posting signals to assess whether this is a real, active opening.
 
 **Assessment:** Apply the same three tiers (High Confidence / Proceed with Caution / Suspicious), weighting available signals more heavily. If insufficient signals are available to make a determination, default to "Proceed with Caution" with a note about limited data.
 
-#### Global Score
+#### Fit vs Deal (replaces the single global score)
 
-| Dimension | Score |
-|-----------|-------|
-| CV Match | X/5 |
-| North Star alignment | X/5 |
-| Comp | X/5 |
-| Cultural signals | X/5 |
-| Red flags | -X (if any) |
-| **Global** | **X/5** |
+Score each dimension 1-5 (red flags as a penalty, 0 when none):
+
+| Dimension | Score | Feeds |
+|-----------|-------|-------|
+| CV Match | X/5 | Fit |
+| North Star alignment | X/5 | Fit |
+| Red flags | -X | Fit (penalty) |
+| Comp | X/5 | Deal |
+| Cultural signals | X/5 | Deal |
+| Risk (5 = low risk) | X/5 | Deal |
+
+- **fit_score** = mean(CV Match, North Star) minus red flags. It alone gates the
+  decision: **≥ 4.0 apply · 3.0-3.9 consider · < 3.0 skip** (any hard stop → skip).
+- **deal_score** = mean(Comp, Culture, Risk). It NEVER changes the decision; it
+  sets **priority** (≥ 4.0 high · 3.0-3.9 medium · < 3.0 low) and feeds the
+  negotiation notes in Block D.
+- Comp, title band, process friction and posting doubts are Deal, never Fit.
+- A **hard stop** is a `required` item with no direct or adjacent evidence in the
+  sources of truth, or a language level above the candidate's that the JD states
+  as mandatory (e.g. "Deutsch C1 zwingend"). `nice_to_have` items, an unstated
+  language level and a German-language JD are soft gaps with mitigation.
+
+`evaluation-rules.mjs` recomputes fit, deal, decision, priority and the
+`next_action` checklist from your dimension scores and the JD record after you
+finish, and rewrites the Machine Summary, the header and the Fit vs Deal box.
+Score the dimensions honestly; do not try to land a decision.
+
+#### next_action rules (by employment type and channel)
+
+- `direct_hire` (company ATS, named recruiter): **apply via the ATS first**, then a
+  LinkedIn connection note to the named recruiter (in the JD language when not
+  English, under 300 characters). NEVER "email the recruiter to confirm salary band
+  or working language before applying": those are first-call questions (Block F).
+- `contract_b2b` / `agency`: qualify first. Ask B2B vs direct hire, rate/band and
+  the end client's working language; no CV before the role is qualified; share
+  no information about other commitments or dates.
+- `skip`: no application. For agency/B2B, a one-line decline asking to be matched
+  to target-archetype roles.
 
 #### Machine Summary
 
-Create a machine-readable summary from the completed A-G evaluation and global score. This block is for downstream scripts; keep field names exact, use YAML, and do not add prose inside the fence.
+Create a machine-readable summary from the completed A-G evaluation. Keep field
+names exact, use YAML, no prose inside the fence.
 
 ```yaml
 company: "{empresa}"
 role: "{rol}"
-score: {X.X}
+fit_score: {X.X}
+deal_score: {X.X}
+decision: "{apply | consider | skip}"
+priority: "{high | medium | low}"
+score: {X.X}            # = fit_score (legacy readers)
+final_decision: "{Apply | Consider | Skip}"   # legacy mirror of decision
+scores:
+  cv_match: {X.X}
+  north_star: {X.X}
+  red_flags: {X.X}      # penalty, 0 when none
+  comp: {X.X}
+  culture: {X.X}
+  risk: {X.X}
 legitimacy_tier: "{High Confidence | Proceed with Caution | Suspicious}"
 archetype: "{detectado}"
-final_decision: "{Apply | Consider | Research first | Skip}"
+employment_type: "{from the JD record}"
+channel: "{from the JD record}"
+language: "{from the JD record}"
+level:
+  detected: "{level the JD hires at}"
+  candidate: "{candidate natural level}"
 hard_stops:
-  - "{blocking gap or risk}"
+  - "{required item with no evidence, or mandatory language level above the candidate's}"
 soft_gaps:
-  - "{non-blocking gap}"
+  - "{non-blocking gap + mitigation}"
 top_strengths:
   - "{strength most relevant to this role}"
+verified_facts:
+  confirmed:
+    - "{fact confirmed from the live page or the JD record: apply control, benefits parsed, named contact, posting date}"
+  inferred:
+    - "{assumption, e.g. salary band estimate, team size}"
 risk_level: "{Low | Medium | High}"
 confidence: "{Low | Medium | High}"
-next_action: "{one concrete next step}"
+next_action:
+  - "{ordered step 1}"
+  - "{ordered step 2}"
 ```
 
 Rules:
-- Use `[]` for `hard_stops`, `soft_gaps`, or `top_strengths` when empty.
-- `score` is numeric only, without `/5`.
-- `final_decision` must reflect the full evaluation, not only the CV match.
+- Use `[]` for empty lists. Scores are numeric, without `/5`.
 - Do not invent missing data. If confidence is limited, set `confidence: "Low"` and explain the limitation in the human-readable sections.
 
 ### Paso 3 — Save Report .md
@@ -272,7 +331,7 @@ Where `{company-slug}` is the company name in lowercase, without spaces, with hy
 
 **Date:** {{DATE}}
 **Archetype:** {detected}
-**Score:** {X/5}
+**Score:** {fit X.X/5} (fit) · **Deal:** {X.X/5} · **Decision:** {APPLY|CONSIDER|SKIP} · **Priority:** {HIGH|MEDIUM|LOW}
 **Legitimacy:** {High Confidence | Proceed with Caution | Suspicious}
 **URL:** {URL of the original offer}
 **PDF:** {output/cv-{candidate}-{company-slug}-{{DATE}}.pdf if score ≥ the resolved `auto_pdf_score_threshold` from Paso 4, else `not generated — run /career-ops pdf {company-slug} to create on demand`}
@@ -280,25 +339,41 @@ Where `{company-slug}` is the company name in lowercase, without spaces, with hy
 
 ---
 
+## Fit vs Deal
+
+| | Score | Inputs | Drives |
+|---|---|---|---|
+| **Fit** | **X.X/5** | CV match · North Star − red flags | **Decision: APPLY / CONSIDER / SKIP** |
+| **Deal** | **X.X/5** | Comp · Culture · Risk | **Priority: HIGH / MEDIUM / LOW** + negotiation |
+
 ## Machine Summary
 
 ```yaml
-company: "{empresa}"
-role: "{rol}"
-score: {X.X}
-legitimacy_tier: "{High Confidence | Proceed with Caution | Suspicious}"
-archetype: "{detectado}"
-final_decision: "{Apply | Consider | Research first | Skip}"
-hard_stops:
-  - "{blocking gap or risk}"
-soft_gaps:
-  - "{non-blocking gap}"
-top_strengths:
-  - "{strength most relevant to this role}"
-risk_level: "{Low | Medium | High}"
-confidence: "{Low | Medium | High}"
-next_action: "{one concrete next step}"
+(the Machine Summary above)
 ```
+
+## Verified facts
+
+| Fact | Status | Source |
+|---|---|---|
+| Apply control | confirmed / not found | JD record `apply_control_present`, liveness `matched` line |
+| Benefits parsed | confirmed (list) / not stated | JD record `benefits` |
+| Named contact | confirmed (name, role) / none | JD record `contact` |
+| Posting date | confirmed / unknown | page or scan history |
+| Salary band, team size, … | inferred | say what it is inferred from |
+
+## Next action (checklist)
+
+1. [ ] {step 1 from next_action}
+2. [ ] {step 2}
+...
+
+Ready-to-paste texts for every step that needs one (omit those that do not apply):
+- **ATS form answers** (motivation, salary expectation phrased as a range consistent with `modes/_profile.md`, availability, work permit)
+- **Cover letter** (JD language when not English; see language rules)
+- **LinkedIn note** to the named contact (< 300 characters, JD language)
+- **First-call script** (also in Block F)
+- For agency/B2B: the **qualification message**
 
 ## A) Role Summary
 (full content)
@@ -326,6 +401,21 @@ next_action: "{one concrete next step}"
 ## Extracted keywords
 (15-20 keywords from the JD for ATS)
 ```
+
+### Paso 3.5 — Enforce the evaluation rules
+
+Right after saving the report, run:
+
+```bash
+node evaluation-rules.mjs enforce reports/{{REPORT_NUM}}-{company-slug}-{{DATE}}.md --record <JD record path> --write
+```
+
+It prints `{fit_score, deal_score, decision, priority, corrections[]}` and patches
+the report (Machine Summary, `**Score:**` header line, Fit vs Deal box, demoted
+hard stops, `next_action`). Use the printed `fit_score` as THE score from here on
+(PDF gate, tracker line, final JSON). If `corrections` rewrote `next_action`,
+make the ready-to-paste texts in "Next action (checklist)" match the new steps.
+The orchestrator runs the same command again after you exit; it is idempotent.
 
 ### Paso 4 — Generate PDF (configurable)
 
@@ -415,6 +505,11 @@ next_action: "{one concrete next step}"
    what the candidate builds), and the user's own closing line is kept verbatim in
    their voice. Do not drop it as "soft skills" — its absence drew negative feedback
    on a real application. Self-awarded adjectives are still banned; evidence is not.
+
+   **Overqualification:** when the Machine Summary `level.overqualified` is true
+   (detected level below the candidate's), the About block carries ONE sentence
+   saying why a builder/IC role is the deliberate choice, taken from the exit
+   narrative in `modes/_profile.md`. Never apologise for seniority; never invent a reason.
 
    **Hard limit:** everything must be backed by `cv.md` / `article-digest.md` /
    `config/profile.yml`. Reframe and reorder, **never invent** — not a role, not a
@@ -562,7 +657,7 @@ TSV format (a single line, no header, 9 tab-separated columns):
 | 6 | score | X.XX/5 | `4.55/5` | Or `N/A` if not evaluable |
 | 7 | pdf | emoji | `✅` or `❌` | Whether a PDF was generated |
 | 8 | report | md link | `[647](reports/647-...)` | Root-relative link; merge-tracker.mjs normalizes it relative to the tracker (e.g. `../reports/...`, #760) |
-| 9 | notes | string | `APPLY HIGH...` | 1-sentence summary |
+| 9 | notes | string | `APPLY HIGH: ...` | `{DECISION} {PRIORITY}:` then a 1-sentence summary |
 
 **IMPORTANT:** The TSV order has status BEFORE score (col 5→status, col 6→score). In applications.md the order is reversed (col 5→score, col 6→status). merge-tracker.mjs handles the conversion.
 

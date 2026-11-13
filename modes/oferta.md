@@ -243,11 +243,23 @@ Save full evaluation in `reports/{###}-{company-slug}-{YYYY-MM-DD}.md`.
 **Date:** {YYYY-MM-DD}
 **URL:**
 **Archetype:** {detected}
-**Score:** {X/5}
+**Score:** {fit X.X/5} (fit) · **Deal:** {X.X/5} · **Decision:** {APPLY|CONSIDER|SKIP} · **Priority:** {HIGH|MEDIUM|LOW}
 **Legitimacy:** {High Confidence | Proceed with Caution | Suspicious}
 **PDF:** {path or pending}
 
 ---
+
+## Fit vs Deal
+(box: fit + decision, deal + priority — see `_shared.md` Scoring System)
+
+## Machine Summary
+(YAML, same schema as `batch/batch-prompt.md` → "Machine Summary")
+
+## Verified facts
+(confirmed from the live page / JD record vs inferred)
+
+## Next action (checklist)
+(ordered steps per the next_action rules in `batch/batch-prompt.md`, each with its ready-to-paste text: ATS form answers, cover letter, LinkedIn note, first-call script; qualification message for agency/B2B)
 
 ## A) Role Summary
 (full content of block A)
@@ -279,6 +291,10 @@ Save full evaluation in `reports/{###}-{company-slug}-{YYYY-MM-DD}.md`.
 (list of 15-20 keywords from the JD for ATS optimization)
 ```
 
+### 1.5 Enforce the evaluation rules
+
+Run `node evaluation-rules.mjs enforce reports/{###}-{company-slug}-{YYYY-MM-DD}.md --record <JD record> --write` and report its `fit_score`, `deal_score`, `decision`, `priority` and any `corrections` to the candidate. Block C/F follow the same level, overqualification and first-call-script rules as `batch/batch-prompt.md`.
+
 ### 2. Record in tracker
 
 **ALWAYS** record in `data/applications.md`:
@@ -286,7 +302,7 @@ Save full evaluation in `reports/{###}-{company-slug}-{YYYY-MM-DD}.md`.
 - Current date
 - Company
 - Role
-- Score: match average (1-5)
+- Score: fit_score from `evaluation-rules.mjs` (1-5)
 - Status: `Evaluated`
 - PDF: ❌ (or ✅ if auto-pipeline generated PDF)
 - Report: root-relative link `[001](reports/001-company-2026-01-01.md)` (when merged via `merge-tracker.mjs` it is normalized to be relative to the tracker's own dir, e.g. `../reports/...`; see #760)

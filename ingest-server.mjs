@@ -246,13 +246,20 @@ function parseMachineSummary(md) {
     if (!r) return [];
     return r[1].split('\n').map(l => l.replace(/^[ \t]*-[ \t]*/, '').replace(/^"|"$/g, '').trim()).filter(Boolean);
   };
+  const numOr = (v) => (v !== null && !Number.isNaN(Number(v)) ? Number(v) : v);
   const scoreStr = scalar('score');
+  // next_action is an ordered checklist since the fit/deal split; older
+  // reports carry a single string.
+  const steps = list('next_action');
   return {
     company: scalar('company'), role: scalar('role'),
-    score: scoreStr !== null && !Number.isNaN(Number(scoreStr)) ? Number(scoreStr) : scoreStr,
+    score: numOr(scoreStr),
+    fit_score: numOr(scalar('fit_score')), deal_score: numOr(scalar('deal_score')),
+    decision: scalar('decision'), priority: scalar('priority'),
     legitimacy_tier: scalar('legitimacy_tier'), archetype: scalar('archetype'),
     final_decision: scalar('final_decision'), risk_level: scalar('risk_level'),
-    next_action: scalar('next_action'),
+    next_action: steps.length ? steps.map((x, i) => `${i + 1}. ${x}`).join(' ') : scalar('next_action'),
+    next_action_steps: steps.length ? steps : (scalar('next_action') ? [scalar('next_action')] : []),
     top_strengths: list('top_strengths'), hard_stops: list('hard_stops'), soft_gaps: list('soft_gaps'),
   };
 }
@@ -951,7 +958,7 @@ function todayPayload() {
         // clause is the recommendation, which is all a decision needs.
         headline: String(r.notes || '').split(/(?<=[.;:])\s/)[0]?.slice(0, 240) || '',
         etag: r.etag,
-        ...(() => { const m = reportMetaFor(REPORTS_DIR, r.report); return { report_num: m.num, jd_url: m.url, jd_note: m.url_note, decision: m.decision }; })(),
+        ...(() => { const m = reportMetaFor(REPORTS_DIR, r.report); return { report_num: m.num, jd_url: m.url, jd_note: m.url_note, decision: m.decision, priority: m.priority }; })(),
       }))
       // Highest score first — a 4.5 sitting undecided costs more than a 2.1.
       .sort((a, b) => (b.score_num ?? -1) - (a.score_num ?? -1));
