@@ -28,6 +28,7 @@
  * `modelName` below and the `--model` examples accordingly.
  */
 
+import { enforceFile } from './evaluation-rules.mjs';
 import { readFileSync, existsSync, writeFileSync, mkdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
@@ -407,6 +408,9 @@ ${evaluationText.replace(/---SCORE_SUMMARY---[\s\S]*?---END_SUMMARY---/, '').tri
 `;
 
     writeFileSync(reportPath, reportContent, 'utf-8');
+    // Fit vs Deal, decision/priority gates and next_action rules (docs/evaluation-rules.md).
+    const enforced = enforceFile(reportPath, { jdText });
+    if (enforced.fit_score !== null) console.log(`    Rules: fit ${enforced.fit_score} → ${enforced.decision}, deal ${enforced.deal_score} → ${enforced.priority} priority`);
     mkdirSync(PATHS.trackerAdditions, { recursive: true });
     const trackerFields = [
       String(parseInt(num, 10)),

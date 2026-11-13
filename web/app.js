@@ -1044,7 +1044,7 @@ function decisionHtml(r, { fresh = false } = {}) {
     <div class="role">${esc(r.role)}</div>
     <div class="meta">
       ${fresh ? '<span class="agebadge new">TODAY</span>' : ageBadge(r.age_days)}
-      ${r.decision ? `<span class="verdict">${esc(r.decision)}</span>` : ''}
+      ${r.decision ? `<span class="verdict">${esc(r.decision)}${r.priority ? ` · ${esc(r.priority)} priority` : ''}</span>` : ''}
       <span>evaluated ${esc(r.date || '—')}</span>
     </div>
     <div class="why">${esc(r.headline)}</div>
