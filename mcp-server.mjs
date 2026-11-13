@@ -240,7 +240,7 @@ function buildServer() {
 
   server.registerTool('get_evaluation', {
     title: 'Get the finished evaluation',
-    description: 'Fetch the full evaluation for a completed job id: score, final_decision, legitimacy_tier, top_strengths, hard_stops, next_action, report_num, report_path. If it is not finished yet, returns the status with evaluation:null and a message. If the job failed, status is "failed".',
+    description: 'Fetch the full evaluation for a completed job id: fit_score (decides: >=4.0 apply, 3.0-3.9 consider, <3.0 skip), deal_score + priority (comp/culture/risk; never changes the decision), decision, legitimacy_tier, top_strengths, hard_stops, next_action_steps (ordered checklist), report_num, report_path. score/final_decision are legacy mirrors of fit_score/decision. Rules: docs/evaluation-rules.md. If it is not finished yet, returns the status with evaluation:null and a message. If the job failed, status is "failed".',
     inputSchema: { id: idSchema },
   }, async ({ id }) => {
     const { status, json } = await ingest(`/evaluation/${String(id)}`);

@@ -1,0 +1,23 @@
+candidate:
+  full_name: "Test Candidate"
+  level: "Senior Architect"
+  birthyear: 1976
+compensation:
+  target_range: "CHF 150K–230K total (FTE)"
+industries:
+  financial_services: ["Example Insurance AG", "Example Bank"]
+  energy_utilities: ["Example Grid AG"]
+  telecom: ["Example Telco"]
+cover_letter:
+  language_learning:
+    - language: German
+      current_level: "B1, B2 in progress"
+canonical_facts:
+  - id: grid-client
+    fact: "Advised a Swiss grid operator on critical-infrastructure architecture"
+    guard: never_name_client
+    client: "Example Grid AG"
+    say_instead: "a Swiss grid operator"
+  - id: health-product-live
+    fact: "The health product shipped to iOS and Android"
+    guard: never_say_not_launched

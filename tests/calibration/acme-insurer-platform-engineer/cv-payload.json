@@ -1,0 +1,10 @@
+{
+  "name": "Test Candidate",
+  "tagline": "Platform Engineer AI",
+  "summary": "I build and run the platform layer that makes AI usable inside a company, shipped to production and operated with the teams that depend on it. For an insurer, that means Copilot, agents and Power Platform services that are secure, reusable and owned. I chose a builder role on purpose: I want to ship and run platforms again, not only design them.",
+  "experience": [
+    { "role": "Independent AI Consultant, Trainer & Lab Author", "company": "Example Labs", "dates": "01/2024 - 11/2026", "location": "Zurich", "bullets": ["Shipped agent platforms to production for enterprise teams, including a Swiss grid operator"] },
+    { "role": "Co-Founder & AI Architect", "company": "Example Health GmbH", "dates": "09/2025 - 04/2026", "location": "Zurich", "bullets": ["Shipped a mobile MVP to iOS and Android and ran it in production"] }
+  ],
+  "achievements": [{ "icon": "faGem", "title": "Agent platform shipped to production", "detail": "Operated for enterprise teams" }]
+}

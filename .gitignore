@@ -33,6 +33,10 @@ batch/tracker-additions/**/*.tsv
 !batch/tracker-additions/.gitkeep
 jds/*
 !jds/.gitkeep
+# Private calibration golden cases (real JDs, reports, CV payloads). The public
+# synthetic set lives in tests/calibration/.
+calibration/*
+!calibration/README.md
 
 # Interview prep (accumulated STAR+R stories — user data)
 interview-prep/*

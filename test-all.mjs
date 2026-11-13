@@ -5695,6 +5695,7 @@ for (const suite of [
   'test-evaluation-rules.mjs',
   'test-output-guards.mjs',
   'test-build-verify.mjs',
+  'test-calibration.mjs',
 ]) {
   const suitePath = join(ROOT, suite);
   if (!existsSync(suitePath)) { warn(`${suite} not found — skipped`); continue; }
@@ -5706,6 +5707,22 @@ for (const suite of [
     const out = `${e.stdout || ''}${e.stderr || ''}`;
     const failing = out.split('\n').filter(l => l.includes('❌')).slice(0, 5);
     fail(`${suite} FAILED:\n${failing.map(l => `      ${l.trim()}`).join('\n') || `      ${e.message}`}`);
+  }
+}
+
+// ── PRIVATE CALIBRATION CASES (local only) ──────────────────────
+// calibration/ is user layer (gitignored): real JDs and evaluation snapshots.
+// Its "before" snapshots are expected to fail until the role is re-run under
+// the current rules, so failures here are warnings, never a red build. The
+// public synthetic set (tests/calibration/) runs above and does fail the build.
+if (existsSync(join(ROOT, 'calibration'))) {
+  console.log('\n34. Private calibration cases (warn-only)');
+  try {
+    const out = execFileSync(NODE, [join(ROOT, 'calibrate.mjs'), 'check', join(ROOT, 'calibration'), '--quiet'], { cwd: ROOT, encoding: 'utf-8', stdio: 'pipe' });
+    pass(out.trim().split('\n').pop());
+  } catch (e) {
+    const out = `${e.stdout || ''}`;
+    warn(`private calibration: ${out.trim().split('\n').pop()} — run \`node calibrate.mjs check calibration\` for details`);
   }
 }
 
