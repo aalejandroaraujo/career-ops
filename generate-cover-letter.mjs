@@ -13,6 +13,7 @@
  * without loading Playwright (renderHtmlToPdf is imported lazily inside main).
  */
 
+import { checkGuards, loadFactGuards, loadProfile, mapStrings, swissSpelling } from "./output-guards.mjs";
 import { readFileSync, existsSync, mkdirSync } from "fs";
 import { dirname, resolve, basename, join } from "path";
 import { fileURLToPath, pathToFileURL } from "url";
@@ -182,7 +183,19 @@ Usage:
     process.exit(1);
   }
 
-  const payload = JSON.parse(readFileSync(payloadPath, "utf-8"));
+  let payload = JSON.parse(readFileSync(payloadPath, "utf-8"));
+
+  // Swiss employers: Swiss Standard German spelling ("ss", never "ß").
+  const locale = String(payload.letter?.locale || "");
+  if (/^de-CH$/i.test(locale) || payload.letter?.swiss === true) {
+    payload = { ...payload, letter: mapStrings(payload.letter, swissSpelling) };
+  }
+  // Guarded facts (config/profile.yml canonical_facts) never reach a letter.
+  const guardErrors = checkGuards(JSON.stringify(payload.letter || {}), loadFactGuards(loadProfile()));
+  if (guardErrors.length) {
+    console.error(`ERROR: cover letter rejected by output guards:\n${guardErrors.map((e) => `  ✗ ${e}`).join("\n")}`);
+    process.exit(1);
+  }
 
   if (args.out) {
     payload.output_path = args.out;

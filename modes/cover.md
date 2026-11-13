@@ -262,6 +262,7 @@ End the draft with: "How does this read? Once you approve I'll generate the PDF.
 8. **Bullet format** — `**Bold lead phrase,** impact sentence with metric.` No em dash between lead and sentence.
 9. **Self-check** — before finalising, re-read each sentence: could it appear in any cover letter for any company? If yes, rewrite it.
 10. **Tone consistency** — apply the chosen tone (Step 6D) uniformly. Don't shift register mid-letter.
+11. **JD language** — for a non-English JD, write the letter in the JD language, short, consistent with the candidate's stated level (state the level once, explicitly, e.g. the `language_learning[].sentence` from profile.yml). Swiss employers: Swiss spelling ("ss", never "ß") and `"locale": "de-CH"` in the payload; `generate-cover-letter.mjs` applies it and rejects guarded facts (`config/profile.yml` → `canonical_facts`). See `_shared.md` → Language Rules.
 
 ---
 
@@ -284,6 +285,7 @@ Assemble the JSON payload:
   },
   "letter": {
     "role_title": "{exact from JD}",
+    "locale": "{en | de-CH | de-DE | fr-CH | ... — de-CH applies Swiss spelling}",
     "company": "{company name}",
     "city": "{JD city}",
     "date": "{YYYY-MM-DD}",

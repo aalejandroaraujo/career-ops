@@ -17,6 +17,27 @@ candidate:
   # Switzerland) where a professional photo is expected. Use a local file path or
   # a data: URL — the PDF renderer inlines local images.
   photo: ""
+  # Natural level, for the overqualification / age-band check (evaluation-rules.mjs).
+  level: "Senior Engineer"
+
+# Industries with named customers or employers (from cv.md / article-digest.md).
+# Consulted before the evaluator declares a domain gap. Empty lists do not count.
+industries:
+  financial_services: ["Example Bank AG"]
+  energy_utilities: []
+  telecom: ["Example Telco"]
+  healthtech: []
+  public_sector: []
+
+# Facts with usage guards, enforced in every generated CV and cover letter by
+# output-guards.mjs. Guards: never_name_client (use say_instead), never_say_not_launched,
+# forbid (strings in `forbidden` never appear).
+canonical_facts:
+  - id: example-client
+    fact: "Built a document-intake agent for a regional insurer"
+    guard: never_name_client
+    client: "Example Insurance Ltd"
+    say_instead: "a regional insurer"
 
 target_roles:
   # Your North Star roles — what you're optimizing for
