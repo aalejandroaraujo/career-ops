@@ -23,3 +23,18 @@ services:
     networks:
       careerops-bridge:
         ipv4_address: 172.21.0.50
+
+  # Queue alerts pushed to Telegram, from the same bot Hermes uses (see
+  # .env.example). The ingest server reads these, but docker-compose.yml never
+  # forwarded them, so filling them in .env alone did nothing.
+  career-ops:
+    environment:
+      - CAREEROPS_ALERT_TELEGRAM_TOKEN=${CAREEROPS_ALERT_TELEGRAM_TOKEN:-}
+      - CAREEROPS_ALERT_TELEGRAM_CHAT=${CAREEROPS_ALERT_TELEGRAM_CHAT:-}
+      # Long-lived (~1 year) subscription token from `claude setup-token`.
+      # Replaces the in-container `claude auth login`, whose refresh token hard-
+      # expires every ~30 days (outages 2026-09-01 and 2026-09-30). Takes
+      # precedence over ~/.claude/.credentials.json. _EXPIRES (YYYY-MM-DD) is
+      # what queue-health reads to send Telegram warnings 14/7/3/1 days ahead.
+      - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN:-}
+      - CLAUDE_CODE_OAUTH_TOKEN_EXPIRES=${CLAUDE_CODE_OAUTH_TOKEN_EXPIRES:-}

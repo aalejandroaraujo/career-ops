@@ -1,0 +1,67 @@
+# Hiring-signal scouting config — SignalForge stream B.
+#
+# This file is portals.yml-SHAPED on purpose: hiring-signals.mjs runs
+# scan-ats-full.mjs with CAREER_OPS_PORTALS pointed here, so the reverse ATS
+# scanner reuses its own title/location filters against this file instead of
+# the user's job-hunt portals.yml. Nothing here touches the job-hunt pipeline:
+# the scan runs --dry-run --json, so data/pipeline.md and data/scan-history.tsv
+# are never written.
+#
+# Per the spec: "any new provider is a config plus at most 30 lines of code".
+# This is the config half. Retune the filters here, not in code.
+
+# ── Which postings count as a data-platform signal ──────────────────
+# Precision over coverage. Two hits at one company inside 90 days is what
+# triggers outreach on the core side, so a loose filter here does not produce
+# more deals — it produces false outreach. Keep phrases multi-word; bare
+# "fabric" matches textile jobs and is deliberately absent.
+title_filter:
+  positive:
+    - data platform engineer
+    - data platform architect
+    - data platform
+    - data engineer
+    - data engineering
+    - analytics engineer
+    - data architect
+    - data warehouse
+    - data & analytics
+    - data and analytics
+    - business intelligence
+    - bi developer
+    - bi engineer
+    - bi consultant
+    - power bi
+    - microsoft fabric
+    - azure data
+    - synapse
+    - databricks
+    - lakehouse
+    - head of data
+    - director of data
+  negative:
+    - intern
+    - internship
+    - working student
+    - werkstudent
+    - praktikum
+    - apprentice
+    - graduate program
+    - data entry
+    - data protection
+    - recruiter
+    - account executive
+    - sales development
+    - clinical data
+
+# Location: worldwide, per the spec ("enterprises worldwide"). No
+# location_filter block means every location passes.
+
+# ── Collection settings ─────────────────────────────────────────────
+# Read by hiring-signals.mjs (ignored by scan-ats-full.mjs).
+hiring_signals:
+  ats: [greenhouse, lever, ashby]   # workday's directory is slow; add it when the daily run has headroom
+  since_days: 14                    # postings first published inside this window
+  companies_per_ats: 400            # cap per ATS directory per run
+  daily_cap: 250                    # hard cap on signals kept per refresh (spec: 500/day across both streams)
+  shuffle: true                     # sample a different slice of each directory per run; set false to always scan the head

@@ -6,8 +6,9 @@
 #
 #   1. scan.mjs          refresh the pipeline from every configured source (zero tokens)
 #   2. liveness sweep    drop postings that died since the last pass (zero tokens)
-#   3. batch evaluation  score the newest Swiss roles with claude -p workers
+#   3. batch evaluation  score the newest Swiss roles with AI CLI workers (provider from config)
 #   4. merge + digest    fold results into the tracker, render the morning digest
+#   5. hiring signals    refresh the SignalForge deal feed (separate stream, zero tokens)
 #
 # Steps 1, 2 and 4 are deterministic and free. Step 3 spends tokens, so it is
 # capped (--max) and skippable (--no-eval).
@@ -40,6 +41,19 @@ while [[ $# -gt 0 ]]; do
 done
 
 log() { echo "[$(date +%T)] $*" | tee -a "$LOG"; }
+
+# Non-zero once any stage fails in a way that needs a human. The script still
+# runs to completion (a broken eval leg must not cost us the digest or the
+# signal refresh) but exits non-zero so cron surfaces it.
+SCOUT_FAILED=0
+
+# How many offers the runner has ever driven to 'completed'. Compared before and
+# after a batch to prove the evaluation leg actually did work.
+state_completed_count() {
+  local f="batch/batch-state.tsv"
+  [[ -f "$f" ]] || { echo 0; return; }
+  awk -F'\t' 'NR>1 && $3 == "completed" { n++ } END { print n+0 }' "$f"
+}
 
 # Single-instance guard. Two concurrent runs fight over Playwright browser
 # contexts and the loser reports every posting as "uncertain" — a false signal
@@ -83,26 +97,67 @@ fi
 
 # ── 3. Evaluate the newest Swiss roles ─────────────────────────────────────
 if [[ "$RUN_EVAL" == true && "$SWISS_COUNT" -gt 0 ]]; then
-  if command -v claude >/dev/null; then
+  # Resolve provider: CAREEROPS_PROVIDER env > config/profile.yml > default (qwen)
+  SCOUT_PROVIDER="${CAREEROPS_PROVIDER:-}"
+  if [[ -z "$SCOUT_PROVIDER" && -f config/profile.yml ]]; then
+    SCOUT_PROVIDER=$(sed -n '/^provider:/,/^[^ ]/{ s/.*name:[[:space:]]*"\?\([^"#]*\)"\?.*/\1/p; }' config/profile.yml | head -1)
+  fi
+  SCOUT_PROVIDER="${SCOUT_PROVIDER:-qwen}"
+
+  # Check the right CLI is available
+  SCOUT_CLI="$SCOUT_PROVIDER"
+  if command -v "$SCOUT_CLI" >/dev/null; then
     # Feed the batch runner only roles with no tracker row yet, newest first.
     INPUT="batch/batch-input.tsv"
     cp "$INPUT" "$INPUT.bak-$TODAY" 2>/dev/null || true
+    # Allocate ids above the highest one the state file has ever used. The runner
+    # keys an offer on (id, url), so restarting at 1 is no longer silently fatal,
+    # but fresh ids keep each day's rows distinct and readable in batch-state.tsv.
+    STATE="batch/batch-state.tsv"
+    # Carry over rows other doors queued (Telegram/Hermes, CV requests, the web
+    # UI) that have not finished. Rewriting the file wholesale dropped them: the
+    # Experts Inside job sent from Telegram on 2026-09-12 failed on a dead quota
+    # and was wiped by the next morning's scout, so it could never be retried.
+    KEEP_ROWS=$(awk -F'\t' -v sf="$STATE" '
+      BEGIN { while ((getline line < sf) > 0) { split(line, c, "\t"); st[c[1]] = c[3] } }
+      FNR > 1 && $1 ~ /^[0-9]+$/ && $3 != "daily-scout" && st[$1] != "completed" && st[$1] != "skipped"
+    ' "$INPUT.bak-$TODAY" 2>/dev/null || true)
+    # Fresh ids must clear both the state file and the carried rows, or a kept
+    # row that never started would share an id with a new one.
+    BASE_ID=$( { cat "$STATE" 2>/dev/null; printf '%s\n' "$KEEP_ROWS"; } |
+      awk -F'\t' '$1 ~ /^[0-9]+$/ && $1+0 > m { m = $1+0 } END { print m+0 }')
     {
       printf 'id\turl\tsource\tnotes\n'
+      [[ -n "$KEEP_ROWS" ]] && printf '%s\n' "$KEEP_ROWS"
       n=0
       while read -r url; do
         [[ -z "$url" ]] && continue
         grep -qF "$url" data/applications.md 2>/dev/null && continue   # already tracked
         n=$((n+1))
         [[ "$n" -gt "$MAX_EVAL" ]] && break
-        printf '%s\t%s\tdaily-scout\tauto %s\n' "$n" "$url" "$TODAY"
+        printf '%s\t%s\tdaily-scout\tauto %s\n' "$((BASE_ID + n))" "$url" "$TODAY"
       done < <(tac "$SWISS_URLS")
     } > "$INPUT"
-    QUEUED=$(( $(wc -l < "$INPUT") - 1 ))
-    log "queued $QUEUED role(s) for evaluation"
+    KEPT=$([[ -n "$KEEP_ROWS" ]] && printf '%s\n' "$KEEP_ROWS" | wc -l || echo 0)
+    QUEUED=$(( $(wc -l < "$INPUT") - 1 - KEPT ))
+    (( KEPT > 0 )) && log "kept $KEPT unfinished row(s) queued by other doors"
+    log "queued $QUEUED role(s) for evaluation (ids $((BASE_ID + 1))..$((BASE_ID + QUEUED)))"
     if [[ "$QUEUED" -gt 0 ]]; then
+      COMPLETED_BEFORE=$(state_completed_count)
       ./batch/batch-runner.sh >>"$LOG" 2>&1
       log "batch runner done (exit $?)"
+      # Queued work that produces zero completions is the failure that hid the
+      # id-collision bug for ten days: the runner exits 0 after skipping every
+      # offer, so nothing downstream notices. Treat it as a hard error.
+      COMPLETED_AFTER=$(state_completed_count)
+      EVALUATED=$(( COMPLETED_AFTER - COMPLETED_BEFORE ))
+      if (( EVALUATED <= 0 )); then
+        log "ERROR: queued $QUEUED role(s) but completed 0 — evaluation leg is broken, not idle"
+        log "ERROR: inspect '$INPUT' against '$STATE' (stale status? all offers skipped?)"
+        SCOUT_FAILED=1
+      else
+        log "evaluated $EVALUATED/$QUEUED role(s)"
+      fi
       # Merge inside the container: the tracker write lock is pid-namespaced.
       if docker compose exec -T career-ops node merge-tracker.mjs >>"$LOG" 2>&1; then
         log "tracker merged"
@@ -111,12 +166,29 @@ if [[ "$RUN_EVAL" == true && "$SWISS_COUNT" -gt 0 ]]; then
       fi
     fi
   else
-    log "WARN: claude CLI not on PATH — skipping evaluation"
+    log "WARN: $SCOUT_CLI CLI not on PATH (provider: $SCOUT_PROVIDER) — skipping evaluation"
   fi
 fi
 rm -f "$SWISS_URLS"
 
 # ── 4. Digest ──────────────────────────────────────────────────────────────
 node pipeline-digest.mjs >>"$LOG" 2>&1 && log "digest written: reports/digests/$TODAY-digest.md"
+
+# ── 5. SignalForge hiring signals (separate stream, zero tokens) ────────────
+# Not part of the job hunt: this refreshes the company hiring-signal feed that
+# signalforge-core consumes over MCP (see hiring-signals.mjs). It reads its own
+# config, writes its own store, and runs the reverse scan --dry-run, so nothing
+# here touches data/pipeline.md, the tracker, or the digest above. Failure is
+# logged and ignored — the job-hunt pass must never depend on it.
+if node hiring-signals.mjs --refresh >>"$LOG" 2>&1; then
+  log "hiring signals refreshed ($(node hiring-signals.mjs --stats | node -e 'let d="";process.stdin.on("data",c=>d+=c).on("end",()=>process.stdout.write(String(JSON.parse(d).total)))') in store)"
+else
+  log "WARN: hiring-signals refresh failed — SignalForge feed is stale, job hunt unaffected"
+fi
+
+if (( SCOUT_FAILED )); then
+  log "=== daily-scout done WITH ERRORS (see ERROR lines above) ==="
+  exit 1
+fi
 
 log "=== daily-scout done ==="

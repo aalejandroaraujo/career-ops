@@ -14,14 +14,19 @@
   --text: #e6e9ef; --muted: #8b93a7;
   --green: #4ade80; --yellow: #fbbf24; --red: #f87171; --blue: #60a5fa; --accent: #7c93f5;
   --chip: #1f2430; --chip-on: #2b3550;
+  /* Small-text secondary colour: ~8:1 on every surface, vs --muted's ~5.4:1.
+     Used for 13px metadata, where --muted reads faint on a phone outdoors. */
+  --muted-strong: #adb5c6;
 }
 
 @media (prefers-color-scheme: light) {
   :root {
     --bg: #f6f7f9; --panel: #ffffff; --card: #ffffff; --line: #dfe3ea;
     --text: #1a1d23; --muted: #5f6878;
-    --green: #16a34a; --yellow: #b45309; --red: #dc2626; --blue: #2563eb; --accent: #4f46e5;
+    /* #16a34a measured 3.30:1 on white — below AA. */
+    --green: #15803d; --yellow: #b45309; --red: #dc2626; --blue: #2563eb; --accent: #4f46e5;
     --chip: #eef0f4; --chip-on: #dfe4f5;
+    --muted-strong: #414a59;
   }
 }
 
@@ -62,7 +67,7 @@ button.icon { padding: 8px 10px; }
 .chip[aria-pressed="true"] { background: var(--chip-on); color: var(--text); border-color: var(--accent); font-weight: 600; }
 
 main { padding: 12px 14px calc(env(safe-area-inset-bottom) + 80px); max-width: 1100px; margin: 0 auto; }
-.stats { color: var(--muted); margin: 2px 2px 12px; font-size: 13px; }
+.stats { color: var(--muted-strong); margin: 2px 2px 12px; font-size: 13px; }
 .empty { color: var(--muted); text-align: center; margin-top: 48px; }
 .muted { color: var(--muted); }
 .err { color: var(--red); }
@@ -76,7 +81,33 @@ main { padding: 12px 14px calc(env(safe-area-inset-bottom) + 80px); max-width: 1
 .card .role { color: var(--muted); margin: 2px 0 10px; }
 .fit { font-weight: 800; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .fit.hi { color: var(--green); } .fit.mid { color: var(--yellow); } .fit.lo { color: var(--red); }
-.card .meta { display: flex; flex-wrap: wrap; gap: 8px 14px; color: var(--muted); font-size: 13px; margin-top: 4px; }
+/* Recent entry indicator: subtle left border + NEW badge */
+.card.recent { border-left: 3px solid var(--accent); }
+.new-badge {
+  display: inline-block; font-size: 10px; font-weight: 700; letter-spacing: 0.5px;
+  background: var(--accent); color: white; padding: 2px 6px; border-radius: 4px;
+  margin-left: 6px; vertical-align: middle;
+}
+/* Today's evaluations section - prominent display at top of Applications */
+.today-evals-section {
+  background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
+  padding: 16px; margin-bottom: 16px;
+}
+.today-evals-header {
+  margin: 0 0 12px; font-size: 16px; font-weight: 700; color: var(--accent);
+  display: flex; align-items: center; gap: 8px;
+}
+.today-evals-header .count {
+  background: var(--accent); color: white; font-size: 12px;
+  padding: 2px 8px; border-radius: 10px; font-weight: 600;
+}
+.today-evals-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px;
+}
+@media (max-width: 600px) {
+  .today-evals-grid { grid-template-columns: 1fr; }
+}
+.card .meta { display: flex; flex-wrap: wrap; gap: 8px 14px; color: var(--muted-strong); font-size: 13px; margin-top: 4px; }
 .card .foot { display: flex; align-items: center; gap: 10px; margin-top: 12px; flex-wrap: wrap; }
 select.status { flex: 1; min-width: 150px; padding: 10px; border-radius: 10px; font-size: 15px; }
 select.status[data-s="Applied"], select.status[data-s="Interview"],
@@ -160,5 +191,230 @@ select.status[data-s="Rejected"], select.status[data-s="Discarded"], select.stat
 }
 .pipe-row { display: flex; flex-direction: column; gap: .2rem; }
 .pipe-row .role { font-weight: 600; }
-.pipe-row .meta { opacity: .7; font-size: .86em; }
+.pipe-row .meta { font-size: .86em; color: var(--muted-strong); }
 .pipe-row .ch { font-size: .86em; }
+
+/* ── Queue health ─────────────────────────────────────────────────────────── */
+/* The banner is deliberately loud and deliberately NOT dismissable: the whole
+ * failure mode being fixed here is a stall that looked like silence. */
+.banner {
+  margin: 10px auto 0; max-width: 1100px; width: calc(100% - 28px); padding: 12px 14px;
+  border: 1px solid var(--red); border-left-width: 4px; border-radius: 12px;
+  background: color-mix(in srgb, var(--red) 12%, var(--panel));
+}
+@supports not (background: color-mix(in srgb, red 10%, blue)) {
+  .banner { background: var(--panel); }
+}
+.banner b { color: var(--red); }
+.banner .d { color: var(--text); font-size: 14px; margin: 4px 0 6px; }
+.banner .more { color: var(--muted); font-size: 13px; font-weight: 400; }
+.banner code, .prob code {
+  display: block; margin-top: 6px; padding: 7px 9px; border-radius: 8px;
+  background: var(--bg); border: 1px solid var(--line);
+  font-size: 12.5px; overflow-x: auto; white-space: pre; user-select: all;
+}
+
+/* Tab dot: the at-a-glance signal, visible from whichever tab you are on. */
+.dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-left: .35em; vertical-align: middle; }
+.dot.bad { background: var(--red); }
+.dot.warn { background: var(--yellow); }
+
+.health h3 { font-size: 12px; text-transform: uppercase; color: var(--muted); letter-spacing: .5px; margin: 22px 0 8px; }
+.health .count { color: var(--muted); font-weight: 400; }
+.checks { display: flex; flex-direction: column; gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+.check { display: grid; grid-template-columns: 26px 1fr auto; gap: 8px; align-items: center; padding: 11px 12px; background: var(--card); font-size: 14px; }
+.check .l { color: var(--muted-strong); }
+.check .v { text-align: right; word-break: break-word; }
+.check.bad .v { color: var(--red); font-weight: 600; }
+.check.warn .v { color: var(--yellow); }
+
+.prob { border: 1px solid var(--line); border-left: 3px solid var(--yellow); border-radius: 10px; padding: 11px 13px; margin-bottom: 8px; background: var(--card); }
+.prob.error { border-left-color: var(--red); }
+.prob .d { color: var(--muted); font-size: 14px; margin-top: 3px; }
+
+.qrow { display: flex; flex-direction: column; gap: .25rem; }
+.qrow.stale { border-color: var(--red); }
+.qrow .top { align-items: center; gap: 8px; }
+.qrow .role a { color: var(--blue); font-size: 13px; word-break: break-all; text-decoration: none; }
+.qrow .badge.bad { color: var(--red); border-color: var(--red); }
+.health .checked { font-size: 12px; margin-top: 18px; }
+.qrow .qerr { font-size: 12.5px; color: var(--red); word-break: break-word; }
+/* Worker progress: four segments, one per artefact the worker writes. */
+.qprog { margin-top: 8px; }
+.qprog .segs { display: flex; gap: 4px; margin-bottom: 5px; }
+.qprog .seg { flex: 1; height: 4px; border-radius: 999px; background: var(--line); }
+.qprog .seg.on { background: var(--green); }
+.qprog .qstage { font-size: 12.5px; color: var(--muted-strong); }
+.qprog .qstage.slow { color: var(--yellow); }
+
+/* ── Today ────────────────────────────────────────────────────────────────── */
+.today h3 { font-size: 12px; text-transform: uppercase; color: var(--muted); letter-spacing: .5px; margin: 22px 0 2px; }
+.today h3:first-child { margin-top: 4px; }
+.today .count { color: var(--muted); font-weight: 400; }
+.today .sub { font-size: 13px; margin: 0 0 10px; color: var(--muted-strong); }
+.today .card { margin-bottom: 10px; }
+.act-row .late { color: var(--red); font-weight: 600; }
+.decision { margin-bottom: 12px; }
+.decision .why {
+  font-size: 13px; color: var(--muted); padding: 8px 12px;
+  border: 1px solid var(--line); border-top: none; border-radius: 0 0 12px 12px;
+  margin: -12px 8px 0; background: var(--panel);
+}
+.decision .why b { color: var(--yellow); }
+.decision.stale .card { border-color: var(--yellow); }
+
+/* ── Scouted actions ──────────────────────────────────────────────────────── */
+.pipe-actions { display: flex; align-items: center; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+.act { font-size: 14px; padding: 8px 14px; min-height: 40px; min-width: 0; border-radius: 10px; }
+.act.go { border-color: var(--accent); color: var(--accent); font-weight: 600; }
+.act.drop { color: var(--muted-strong); }
+.act.drop[data-armed="1"] { border-color: var(--red); color: var(--red); font-weight: 600; }
+.act:disabled { opacity: .45; cursor: default; }
+.act-msg { font-size: 13px; color: var(--muted-strong); flex: 1 1 100%; }
+.act-msg.ok { color: var(--green); }
+.act-msg.dup { color: var(--yellow); }
+.act-msg.bad { color: var(--red); }
+.pipe-row.queued { border-color: var(--green); }
+.pipe-row.gone { opacity: 0; transform: translateX(-12px); transition: opacity .2s, transform .2s; }
+
+/* ── Scouted: freshness + preview ─────────────────────────────────────────── */
+.pipe-row .top { display: flex; align-items: flex-start; gap: 10px; }
+.pipe-row .top .role { flex: 1; }
+.agebadge { font-size: 11px; font-weight: 700; letter-spacing: .4px; padding: 3px 8px; border-radius: 999px; white-space: nowrap; }
+.agebadge.new { background: var(--green); color: #04120a; }
+.agebadge.warm { background: var(--chip-on); color: var(--text); }
+.agebadge.old { background: var(--chip); color: var(--muted-strong); }
+.pipe-row.fresh { border-left: 3px solid var(--green); }
+/* Age is carried by the badge and the border only. An opacity fade here dimmed
+   the scout date itself — the one thing an old row most needs to show. */
+.pipe-row.cold { border-left: 3px solid var(--line); }
+.pipe-row.undated { border-left: 3px dashed var(--line); }
+.pipe-row .meta .unknown { font-style: italic; }
+.pipe-row .scouted { color: var(--text); font-weight: 600; }
+.preview {
+  margin: 10px 0 0; padding: 10px 12px; border-radius: 10px;
+  background: var(--bg); border: 1px solid var(--line);
+  font-size: 13px; line-height: 1.45; color: var(--text);
+  white-space: pre-wrap; max-height: 260px; overflow-y: auto;
+}
+.act.peek { color: var(--blue); border-color: var(--line); }
+.act.view { color: var(--blue); font-size: 13px; padding: 6px 10px; min-height: 34px; }
+
+/* ── Today: actionable rows ───────────────────────────────────────────────── */
+.act-row { display: flex; flex-direction: column; }
+.act-row .why { font-size: 13px; color: var(--muted-strong); margin-top: 6px; }
+.act-row .verdict { font-weight: 600; color: var(--accent); }
+.links { display: flex; align-items: center; gap: 12px; margin-top: 10px; flex-wrap: wrap; }
+.links .jd { color: var(--blue); font-weight: 600; font-size: 14px; text-decoration: none; }
+.links .nojd { font-size: 13px; }
+.act-row.gone { opacity: 0; transform: translateX(-12px); transition: opacity .3s, transform .3s; }
+.decision.stale { border-left: 3px solid var(--yellow); }
+/* Today's own results. Green edge, same as a fresh scouted row, so "new" reads
+   the same everywhere in the app. */
+.decision.fresh { border-left: 3px solid var(--green); }
+/* A today row that already has a verdict: shown, not re-offered as a choice. */
+.settled { font-size: 13px; font-weight: 600; color: var(--muted-strong); }
+
+details.aging { margin-top: 8px; }
+details.aging > summary {
+  cursor: pointer; font-size: 12px; text-transform: uppercase; letter-spacing: .5px;
+  color: var(--muted-strong); padding: 10px 2px; list-style: revert;
+}
+details.aging > summary .count { font-weight: 400; }
+
+/* ── report viewer ────────────────────────────────────────────────────────── */
+.report { font-size: 14.5px; line-height: 1.55; }
+.report h3 { font-size: 17px; text-transform: none; color: var(--text); letter-spacing: 0; margin: 20px 0 6px; }
+.report h4, .report h5, .report h6 { font-size: 14px; color: var(--accent); margin: 16px 0 4px; }
+.report p { margin: 8px 0; word-break: break-word; }
+.report ul { margin: 6px 0; padding-left: 20px; }
+.report li { margin: 3px 0; }
+.report pre {
+  background: var(--bg); border: 1px solid var(--line); border-radius: 10px;
+  padding: 10px 12px; overflow-x: auto; font-size: 12.5px; white-space: pre-wrap; word-break: break-word;
+}
+.report code { background: var(--bg); padding: 1px 5px; border-radius: 5px; font-size: 12.5px; }
+.report a { color: var(--blue); }
+
+/* Company name is a link to the posting, not to our own metadata. */
+a.co { color: var(--text); font-weight: 700; font-size: 16px; flex: 1; text-decoration: none; }
+a.co:hover, a.co:active { color: var(--blue); text-decoration: underline; }
+.co.nolink { color: var(--text); font-weight: 700; font-size: 16px; flex: 1; }
+.pipechips { display: flex; gap: 6px; flex-wrap: wrap; }
+.pipechips .chip { min-height: 34px; padding: 5px 12px; font-size: 13px; }
+
+/* Queue repair + drafting */
+.toolbar { margin: 0 0 12px; }
+.prob .pipe-actions { margin-top: 10px; }
+pre.worklog {
+  background: var(--bg); border: 1px solid var(--line); border-radius: 10px;
+  padding: 10px 12px; font-size: 12px; line-height: 1.45;
+  white-space: pre-wrap; word-break: break-word; max-height: 60vh; overflow-y: auto;
+}
+textarea.draft {
+  width: 100%; background: var(--bg); color: var(--text); border: 1px solid var(--line);
+  border-radius: 10px; padding: 10px 12px; font: inherit; font-size: 15px;
+  line-height: 1.5; resize: vertical;
+}
+a.act { display: inline-flex; align-items: center; text-decoration: none; border: 1px solid var(--line); }
+
+/* ── AI provider/model picker ─────────────────────────────────────────────── */
+/* Static, so the panel anchors to the full-width .bar rather than to a button
+   that sits mid-row — anchored to the button it ran off the left edge on a phone. */
+.bar { position: relative; }
+.bar h1 { white-space: nowrap; }
+.model-picker { min-width: 0; flex: 0 1 auto; }
+.model-btn {
+  display: inline-flex; align-items: center; gap: 6px; max-width: 100%;
+  background: var(--chip); padding: 6px 10px; font-size: 13px; font-weight: 600;
+}
+.model-btn[aria-expanded="true"] { border-color: var(--accent); }
+.model-kicker {
+  font-size: 10px; letter-spacing: .6px; color: var(--muted-strong);
+  border: 1px solid var(--line); border-radius: 5px; padding: 0 4px; flex: none;
+}
+.model-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.model-label .ml-m::before { content: ' · '; }
+.model-panel {
+  position: absolute; right: 0; top: calc(100% + 6px); z-index: 20;
+  width: min(340px, 100%);
+  background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+  padding: 12px; box-shadow: 0 10px 30px rgba(0, 0, 0, .35);
+  display: flex; flex-direction: column; gap: 10px;
+}
+.mp-title { font-size: 13px; color: var(--muted-strong); font-weight: 600; }
+.mp-seg { display: flex; gap: 4px; background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 3px; }
+.mp-opt {
+  position: relative;
+  flex: 1; display: flex; align-items: center; justify-content: center; min-height: 40px;
+  border-radius: 8px; font-size: 14px; font-weight: 600; color: var(--muted-strong); cursor: pointer;
+}
+.mp-opt.on { background: var(--chip-on); color: var(--text); }
+.mp-opt input { position: absolute; opacity: 0; pointer-events: none; }
+.mp-opt:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 1px; }
+.mp-opt:has(input:disabled) { cursor: not-allowed; opacity: .6; }
+.mp-models { display: flex; flex-direction: column; gap: 4px; max-height: 50vh; overflow-y: auto; }
+.mp-row {
+  display: flex; align-items: flex-start; gap: 10px; padding: 8px 10px; min-height: 44px;
+  border: 1px solid transparent; border-radius: 10px; cursor: pointer;
+  flex: none; /* in the scrolling column, shrinking would spill the Custom field out of its row */
+}
+.mp-row.on { border-color: var(--accent); background: var(--chip); }
+.mp-row input[type="radio"] { margin: 3px 0 0; min-width: 0; min-height: 0; accent-color: var(--accent); flex: none; }
+.mp-row > span { display: flex; flex-direction: column; min-width: 0; flex: 1; font-size: 14px; }
+.mp-row small { color: var(--muted-strong); font-size: 12px; }
+.mp-row input[type="text"] { margin-top: 6px; padding: 6px 8px; font-size: 16px; width: 100%; }
+.mp-lock { font-size: 12px; color: var(--yellow); }
+.mp-foot { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.mp-foot .act-msg { flex: 1 1 100%; }
+.mp-foot button { flex: 1; padding: 8px 12px; font-size: 14px; }
+.mp-save { background: var(--accent); border-color: var(--accent); color: var(--bg); font-weight: 600; }
+.mp-save:disabled { opacity: .45; cursor: default; }
+.mp-foot .act-msg:empty { display: none; }
+/* On a phone the label is the information; the kicker only costs width. */
+@media (max-width: 480px) {
+  .model-kicker { display: none; }
+  .model-btn { padding: 6px 8px; }
+  .model-btn.has-model .ml-p, .model-btn:not(.has-model) .ml-m { display: none; }
+  .model-label .ml-m::before { content: none; }
+}

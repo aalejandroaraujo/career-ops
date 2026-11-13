@@ -73,6 +73,18 @@ const stub = http.createServer((req, res) => {
     if (path === '/tracker/summary') return json(200, { total: 3, ongoing: 1, response_rate: 33.3, markdown: '| Status | Count |\n|---|---|\n| Applied | 1 |' });
     if (path === '/tracker/followups') return json(200, { count: 1, rows: [{ company: 'EPAM' }], markdown: '| Company |\n|---|\n| EPAM |' });
     if (path === '/tracker/jd-text') return json(202, { accepted: true, job_id: 42, jd_file: 'jds/2026-07-28_acme.md', url: 'local:jds/2026-07-28_acme.md', message: 'queued — job_id is NOT an app_uid' });
+    // POST /cv: the four answers generate_cv has to relay (ingest-server.mjs requestCv).
+    if (path === '/cv' && req.method === 'POST') {
+      const b = seen.at(-1).body || {};
+      if (b.report_num === '284' || /swisslinx/i.test(b.company || '')) {
+        return json(202, { accepted: true, job_id: 77, mode: 'cv_only', report_num: '284', company: 'Swisslinx', score: 2.8 });
+      }
+      if (/power platform/i.test(b.role || '')) {
+        return json(300, { ambiguous: true, candidates: [{ report_num: '284', company: 'Swisslinx' }, { report_num: '285', company: 'Bechtle' }] });
+      }
+      return json(404, { not_found: true, message: 'ask for the URL or the JD text' });
+    }
+    if (path === '/status/66') return json(200, { found: true, id: 66, status: 'paused_rate_limit', done: false, error: 'quota exhausted' });
     if (path === '/tracker/conflict') return json(409, { error: 'etag_mismatch', current: { status: 'Applied' } });
 
     // The dedup shapes ingest-server.mjs actually returns, so the MCP mapping is
@@ -186,16 +198,18 @@ try {
     const expected = [
       'add_note', 'applications_needing_followup', 'applications_summary',
       'create_application_from_jd', 'evaluate_and_wait', 'evaluate_url',
-      'get_application', 'get_evaluation', 'get_status', 'list_applications',
-      'search_applications', 'update_status',
+      'generate_cv', 'get_application', 'get_evaluation', 'get_status', 'list_applications',
+      'render_cv', 'search_applications', 'update_status',
     ];
-    eq(names.length, 12, '12 tools registered (4 existing + 8 new)');
+    eq(names.length, 14, '14 tools registered');
     eq(names.join(), expected.join(), 'every expected tool is present');
 
     const byName = Object.fromEntries((json?.result?.tools || []).map(t => [t.name, t]));
     // A 9B local model picks tools from these descriptions, so the routing
     // hints matter as much as the schema.
     eq(/ongoing/i.test(byName.list_applications.description), true, 'list_applications explains "ongoing"');
+    eq(/I need the CV/.test(byName.generate_cv.description), true, 'generate_cv routes natural "I need the CV for X" requests');
+    eq(/generate_cv/.test(byName.render_cv.description), true, 'render_cv sends CV requests to generate_cv');
     eq(/markdown/i.test(byName.list_applications.description), true, 'list_applications tells the model to forward `markdown`');
     eq(/NOT the numeric job id/i.test(JSON.stringify(byName.update_status.inputSchema)), true,
       'update_status app_uid schema warns against the numeric job id');
@@ -389,6 +403,37 @@ try {
     eq(stillRunning.parsed.status, 'running', 'a duplicate still in flight is waited on, not resubmitted');
     eq(stillRunning.parsed.id, 27, 'the id of the in-flight job is handed back');
     eq(stillRunning.parsed.duplicate, true, 'and it is still flagged as a duplicate');
+  }
+
+  console.log('\n10. generate_cv — a CV on request, whatever the score');
+  {
+    const byCompany = await callTool('generate_cv', { company: 'Swisslinx' });
+    const sent = seen.filter(r => r.path === '/cv').at(-1);
+    eq(sent?.method, 'POST', 'proxies to POST /cv');
+    eq(sent?.body?.company, 'Swisslinx', 'the company is passed as the user said it');
+    eq(sent?.headers?.authorization, 'Bearer stubtok', 'uses the server-side ingest token');
+    eq(byCompany.isError, false, 'an accepted request is not an error');
+    eq(byCompany.parsed.mode, 'cv_only', 'an existing evaluation is re-used');
+    eq(byCompany.parsed.job_id, 77, 'the job id is handed back for get_status');
+
+    const viaNum = await callTool('generate_cv', { report_num: 284 });
+    eq(seen.filter(r => r.path === '/cv').at(-1)?.body?.report_num, '284', 'a numeric report_num is sent as a string');
+    eq(viaNum.parsed.accepted, true, 'report_num resolves');
+
+    const ambiguous = await callTool('generate_cv', { role: 'Power Platform' });
+    eq(ambiguous.isError, false, 'ambiguous is an answer to relay, not a failure');
+    eq(ambiguous.parsed.candidates.length, 2, 'candidates come back so the model can ask which');
+
+    const missing = await callTool('generate_cv', { company: 'Nobody AG' });
+    eq(missing.isError, false, 'not_found is an answer to relay, not a failure');
+    eq(missing.parsed.not_found, true, 'not_found tells the model to ask for a URL or JD');
+
+    const empty = await callTool('generate_cv', {});
+    eq(empty.isError, true, 'a request naming no role is refused before reaching ingest');
+
+    const paused = await callTool('get_status', { id: 66 });
+    eq(paused.parsed.status, 'paused_rate_limit', 'get_status returns a paused job immediately');
+    eq(/PAUSED/.test(paused.parsed.hint || ''), true, 'and tells the model the queue is paused, not running');
   }
 } finally {
   mcp.kill();

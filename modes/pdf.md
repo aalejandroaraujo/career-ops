@@ -164,7 +164,11 @@ step 10; keep the two identical.
   "personal": {
     "phone": "...", "email": "...", "location": "...",
     "linkedin": "<handle, no URL>", "github": "<handle>",
-    "citizenship": ["..."]
+    "citizenship": ["..."],
+    "marital": "<config/profile.yml candidate.marital_status>",
+    "children": "<e.g. '2 children' — from candidate.children>",
+    "birthyear": "<candidate.birthyear>",
+    "permit": "<candidate.residence_permit, e.g. 'Swiss Permit C (permanent residence)'>"
   },
   "summary": "<positioning summary from step 5>",
   "experience": [
@@ -194,7 +198,7 @@ Field notes:
 | Field | Renders as | Notes |
 |-------|-----------|-------|
 | `tagline` | Line under the name | The target title, not the current one |
-| `personal` | Header contact block | `linkedin` / `github` are handles, not URLs |
+| `personal` | Header contact block | `linkedin` / `github` are handles, not URLs. **The key names differ from `config/profile.yml`**: `marital_status` → `marital`, `residence_permit` → `permit`. Carry these over for Swiss/DACH CVs; `build-cv-altacv.mjs` warns if profile.yml sets them and the payload drops them |
 | `summary` | "About Me" | 5-6 sentences, ~120 words max — longer pushes the layout onto a 3rd page |
 | `experience[]` | `\cvevent` entries, main column | Top 3-4 roles, bullets reordered by JD relevance |
 | `previous_experience[]` | Compact "earlier roles" list | Older roles with no bullets — keeps page count down |

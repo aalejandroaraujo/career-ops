@@ -234,6 +234,12 @@ Save the full evaluation to:
 reports/{{REPORT_NUM}}-{company-slug}-{{DATE}}.md
 ```
 
+**This path is relative to the project root, always.** Never resolve it against
+whatever directory you last wrote to. A report written anywhere else — e.g.
+`batch/tracker-additions/reports/` — is invisible to the batch runner, which
+looks only in the project's own `reports/`, and the evaluation is recorded as a
+failure and thrown away.
+
 Where `{company-slug}` is the company name in lowercase, without spaces, with hyphens.
 
 **Report format:**
@@ -301,6 +307,8 @@ next_action: "{one concrete next step}"
 ### Paso 4 — Generate PDF (configurable)
 
 **Gate:** Read `config/profile.yml` → `auto_pdf_score_threshold`. If the key is absent, default to **`3.0`** (the original gate of Path A). This step ONLY runs when the score from Paso 2 is **≥ the resolved threshold**. For everything below it, skip this entire step — the user can generate a tailored PDF on demand later via `/career-ops pdf {company-slug}` using the report from Paso 3 as input.
+
+**Override — `FORCE_CV`:** if the orchestrator's message contains `FORCE_CV`, the user explicitly asked for this CV (typically a recruiter reached out and they have to apply anyway). Skip the gate and run every step below whatever the score. The score, the recommendation and Block F stay exactly as honest as they would otherwise be. A forced CV is never a reason to inflate the fit.
 
 **Rationale:** Generating a tailored PDF costs ~30–60s per offer (payload build + pdfLaTeX compile) and produces files that often go unused — most roles score 2.x/3.x and never reach application. The `3.0` default matches Path A's original behavior; raise `auto_pdf_score_threshold` (e.g. `4.0`) to pre-generate fewer PDFs, or set `0` to generate one for every offer. Both Path A (`/career-ops pipeline`) and Path B (this batch worker) read the same config key for consistency.
 
@@ -510,6 +518,9 @@ Write one TSV line to:
 ```
 batch/tracker-additions/{{ID}}.tsv
 ```
+
+This path is relative to the project root too. Writing the TSV does not change
+where the report from Paso 3 goes — that stays in the root-level `reports/`.
 
 TSV format (a single line, no header, 9 tab-separated columns):
 ```

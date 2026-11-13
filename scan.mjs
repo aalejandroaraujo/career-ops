@@ -164,6 +164,12 @@ export function buildTitleFilter(titleFilter) {
 //   - `block` matches → reject
 //   - `allow` empty → pass (already cleared block)
 //   - `allow` non-empty → must match at least one keyword
+//   - `require_remote_outside_home` (optional, default off) → a location that
+//     cleared `allow` but names NO home keyword must also look remote, or it is
+//     rejected. Without this, listing "London" or "Madrid" in `allow` so those
+//     markets stay discoverable also admits every on-site role in them: 127 of
+//     191 scouted rows were non-Swiss AND non-remote, which is unactionable for
+//     someone with a family in Zurich. `always_allow` is the home market.
 
 // Normalize a keyword list from portals.yml: tolerates a bare string
 // (wrapped to a 1-item array), null/undefined (→ []), and non-string
@@ -180,19 +186,30 @@ function normalizeKeywordList(value) {
     .filter(Boolean);
 }
 
+/** How a posting says "you do not have to move house". */
+const DEFAULT_REMOTE_MARKERS = ['remote', 'anywhere', 'distributed', 'work from home', 'home office', 'telework'];
+
 export function buildLocationFilter(locationFilter) {
   if (!locationFilter) return () => true;
   const alwaysAllow = normalizeKeywordList(locationFilter.always_allow);
   const allow = normalizeKeywordList(locationFilter.allow);
   const block = normalizeKeywordList(locationFilter.block);
+  const requireRemoteOutsideHome = locationFilter.require_remote_outside_home === true;
+  const remoteMarkers = locationFilter.remote_markers
+    ? normalizeKeywordList(locationFilter.remote_markers)
+    : DEFAULT_REMOTE_MARKERS;
 
   return (location) => {
     if (typeof location !== 'string' || location.trim() === '') return true;
     const lower = location.toLowerCase();
-    if (alwaysAllow.length > 0 && alwaysAllow.some(k => lower.includes(k))) return true;
+    const home = alwaysAllow.length > 0 && alwaysAllow.some(k => lower.includes(k));
+    if (home) return true;
     if (block.length > 0 && block.some(k => lower.includes(k))) return false;
-    if (allow.length === 0) return true;
-    return allow.some(k => lower.includes(k));
+    if (allow.length > 0 && !allow.some(k => lower.includes(k))) return false;
+    // Cleared allow, but it is not the home market: it has to be remote to be
+    // worth a look. Off by default so existing configs behave exactly as before.
+    if (requireRemoteOutsideHome && !remoteMarkers.some(k => lower.includes(k))) return false;
+    return true;
   };
 }
 

@@ -122,6 +122,13 @@ export function buildHtml(payload) {
     ? `<p class="language-closing">${escapeHtml(letter.language_closing)}</p>`
     : "";
   const problemsBlock = letter.problems_section ? `<p>${escapeHtml(letter.problems_section)}</p>` : "";
+  // A letter must not end mid-air. When `signoff` is set, render it followed by
+  // the candidate's name; the name comes from `candidate.name`, never the payload,
+  // so the signature can't disagree with the letterhead.
+  const signoffBlock = letter.signoff
+    ? `<div class="signoff"><p>${escapeHtml(letter.signoff)}</p>` +
+      `<p class="signoff-name">${escapeHtml(candidate.name)}</p></div>`
+    : "";
 
   const replacements = {
     "{{NAME}}": escapeHtml(candidate.name),
@@ -136,6 +143,7 @@ export function buildHtml(payload) {
     "{{PROBLEMS_BLOCK}}": problemsBlock,
     "{{CLOSING_BLOCK}}": closingBlock,
     "{{LANGUAGE_CLOSING_BLOCK}}": languageClosingBlock,
+    "{{SIGNOFF_BLOCK}}": signoffBlock,
     "{{FOOTNOTES_BLOCK}}": buildFootnotesBlock(letter.footnotes),
   };
 
