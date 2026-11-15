@@ -339,6 +339,23 @@ export function nextActionPlan(record, decision) {
   const name = record.contact?.name || null;
   const et = record.employment_type || 'unknown';
 
+  // Someone inside: the introduction or referral comes BEFORE the application.
+  // Applying first can lose the referral tag in the ATS, and the insider can
+  // answer what the posting cannot (owner of the role, band, why it is open).
+  // A referral is the "specific reason" that justifies applying at consider.
+  if (record.channel === 'referral' && decision !== 'skip') {
+    const who = record.referral?.role || record.referral?.name || 'your contact';
+    const formal = record.referral?.kind === 'formal';
+    return [
+      { kind: 'brief_referrer', step: `Brief ${who} before applying: send the forwardable intro and the tailored CV, and ask who owns the role (hiring manager / lead architect) and whether the employer's referral tool should be used before you apply`, text: 'referrer_brief+forwardable_intro' },
+      { kind: 'introduction', step: formal ? `${who} submits the internal referral; wait for the referral link or confirmation` : `${who} introduces you to the role owner through her internal contacts; agree a date to follow up if nothing moves`, text: null },
+      { kind: 'ask_insider', step: 'Through the introduction, learn what the posting cannot say: why the role is still open, the band, what really screens candidates out', text: 'insider_questions' },
+      { kind: 'apply', step: `Apply via the ${record.channel === 'referral' && record.url ? 'company ATS' : 'posting'}${record.url ? ` (${record.url})` : ''} once the introduction is made, naming the referral where the form allows it`, text: 'ats_answers+cover_letter' },
+      { kind: 'thank_referrer', step: `Tell ${who} you have applied and thank her; keep her updated at each stage`, text: null },
+      { kind: 'first_call', step: 'First call: band and working-language questions use the first-call script (Block F)', text: 'first_call_script' },
+    ];
+  }
+
   if (decision === 'skip') {
     if (et === 'agency' || et === 'contract_b2b') {
       return [{ kind: 'decline', step: `Reply to the recruiter: decline this mandate in one line and ask to be matched to roles closer to the target archetypes`, text: 'recruiter_reply' }];
@@ -505,10 +522,14 @@ export function enforceReport(md, ctx = {}) {
 
   // next_action: an ordered checklist. Forbidden pre-application emails (direct
   // hire) are replaced by the rule plan; a single string becomes a one-item list.
-  const plan = record ? nextActionPlan(record, decision) : null;
+  const planRecord = record ? { ...record, employment_type: record.employment_type && record.employment_type !== 'unknown' ? record.employment_type : (summary.employment_type || 'unknown') } : null;
+  const plan = planRecord ? nextActionPlan(planRecord, decision) : null;
   if (typeof summary.next_action === 'string') summary.next_action = [summary.next_action];
   const naText = JSON.stringify(summary.next_action || '');
-  if (plan && (isForbiddenNextAction(naText, record) || !summary.next_action?.length)) {
+  if (plan && record.channel === 'referral' && decision !== 'skip' && !/\b(referr\w*|introduc\w*|intro|brief)\b/i.test(String(summary.next_action?.[0] || ''))) {
+    summary.next_action = plan.map((p) => p.step);
+    corrections.push('next_action rewritten for the referral path: the introduction comes before the application');
+  } else if (plan && (isForbiddenNextAction(naText, record) || !summary.next_action?.length)) {
     if (summary.next_action?.length) corrections.push('next_action rewritten: a pre-application email to the recruiter about salary band or working language is not allowed for a direct hire; those questions go in the first-call script');
     summary.next_action = plan.map((p) => p.step);
   } else if (plan && record.employment_type === 'direct_hire' && record.channel === 'company_ats' && decision !== 'skip' && !/\bapply\b/i.test(String(summary.next_action[0] || ''))) {
@@ -530,7 +551,13 @@ export function enforceReport(md, ctx = {}) {
     hard_stops: hardStops,
     soft_gaps: [...new Set(softGaps)],
   });
-  if (record) Object.assign(summary, { employment_type: record.employment_type, channel: record.channel, language: record.language, jd_content_hash: record.content_hash });
+  // Record values win, except where the parser could not decide ("unknown" /
+  // null) and the worker documented a correction in the summary.
+  if (record) {
+    const pick = (k) => (record[k] && record[k] !== 'unknown' ? record[k] : summary[k] ?? record[k] ?? null);
+    Object.assign(summary, { employment_type: pick('employment_type'), channel: pick('channel'), language: pick('language'), jd_content_hash: record.content_hash });
+    if (record.referral) summary.referral = record.referral;
+  }
 
   let out = writeSummary(md, summary);
   out = out.replace(/^\*\*Score:\*\*.*$/m, `**Score:** ${fit === null ? 'n/a' : `${fit.toFixed(1)}/5`} (fit) · **Deal:** ${deal === null ? 'n/a' : `${deal.toFixed(1)}/5`} · **Decision:** ${decision.toUpperCase()} · **Priority:** ${priority.toUpperCase()}`);
@@ -608,13 +635,20 @@ function argOf(args, flag) { const i = args.indexOf(flag); return i >= 0 ? args[
 function main() {
   const [cmd, file, ...rest] = process.argv.slice(2);
   if (cmd !== 'enforce' || !file) {
-    console.error('Usage: node evaluation-rules.mjs enforce <report.md> [--record rec.json] [--tsv file.tsv] [--profile config/profile.yml] [--write]');
+    console.error('Usage: node evaluation-rules.mjs enforce <report.md> [--record rec.json] [--referral "role[|name][|formal]"] [--tsv file.tsv] [--profile config/profile.yml] [--write]');
     process.exit(2);
   }
   const recPath = argOf(rest, '--record');
   const tsvPath = argOf(rest, '--tsv');
   const profilePath = argOf(rest, '--profile') || join(ROOT, 'config/profile.yml');
   const record = recPath && existsSync(recPath) ? JSON.parse(readFileSync(recPath, 'utf8')) : null;
+  // --referral "role[|name][|formal]": someone inside will introduce or refer.
+  const ref = argOf(rest, '--referral');
+  if (record && ref) {
+    const [role, name, kind] = ref.split('|').map((x) => x?.trim() || null);
+    record.channel = 'referral';
+    record.referral = { role, name, kind: kind === 'formal' ? 'formal' : 'warm_intro' };
+  }
   const profile = existsSync(profilePath) ? yaml.load(readFileSync(profilePath, 'utf8')) : null;
   const md = readFileSync(file, 'utf8');
   const { md: out, result } = enforceReport(md, { record, profile });

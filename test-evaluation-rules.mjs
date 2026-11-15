@@ -179,5 +179,17 @@ console.log('\n9. Non-gaps');
 const ng = enforceReport(report.replace('  - "German B1 against a German JD"', '  - "German B1 against a German JD"\n  - "Overqualified / age-band read: not applicable here"'), { record: directHire, profile: { ...profile, candidate: { level: 'Engineer' } } });
 ok(!readSummary(ng.md).soft_gaps.some((g) => /not applicable/.test(g)), 'a soft gap that says "not applicable" is removed');
 
+console.log('\n10. Referral path');
+const refRecord = { ...directHire, channel: 'referral', referral: { role: 'executive assistant in IT', name: null, kind: 'warm_intro' } };
+const rp = nextActionPlan(refRecord, 'consider');
+eq(rp.map((p) => p.kind), ['brief_referrer', 'introduction', 'ask_insider', 'apply', 'thank_referrer', 'first_call'], 'referral: brief → introduction → insider questions → apply → thank → first call');
+ok(rp.findIndex((p) => p.kind === 'brief_referrer') < rp.findIndex((p) => p.kind === 'apply'), 'the introduction comes before the application');
+ok(!rp.some((p) => p.kind === 'linkedin_note'), 'no cold LinkedIn note on the referral path');
+eq(nextActionPlan(refRecord, 'skip').map((p) => p.kind), ['none'], 'a referral does not rescue a skip');
+const re = enforceReport(report, { record: refRecord, profile });
+ok(/^Brief executive assistant in IT/.test(readSummary(re.md).next_action[0]), 'enforce rewrites next_action for the referral path');
+const unk = enforceReport(report.replace('final_decision: "Consider"', 'final_decision: "Consider"\nemployment_type: "direct_hire"'), { record: { ...directHire, employment_type: 'unknown' }, profile });
+eq(readSummary(unk.md).employment_type, 'direct_hire', 'a worker correction survives when the parser said unknown');
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

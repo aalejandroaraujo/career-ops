@@ -17,7 +17,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { deflateRawSync } from 'node:zlib';
 import {
-  buildRecord, contentHash, detectChannel, detectEmploymentType, detectLanguage, intakeFile, normalizeText,
+  buildRecord, companyFromAtsUrl, contentHash, detectChannel, detectEmploymentType, detectLanguage, intakeFile, normalizeText,
 } from './jd-intake.mjs';
 
 let passed = 0;
@@ -154,5 +154,33 @@ try { execFileSync(process.execPath, ['jd-intake.mjs', '-'], { input: 'too short
 eq(thin, 3, 'under-200-char JD exits 3 so the worker treats the JD as missing');
 
 rmSync(tmp, { recursive: true, force: true });
+console.log('\n7. Workday page shape (wrapped lines, CHALLENGE heading, footer furniture)');
+const wd = buildRecord({
+  sourceType: 'url',
+  url: 'https://examplebank.wd3.myworkdayjobs.com/en-US/External/job/Zurich/Architect_r-1',
+  text: [
+    'Example Bank Career', 'Senior System Architect AI 100% (f/m/d)', 'Apply', 'Zurich', 'Full time',
+    'At Example Bank, we value you.',
+    'YOUR CHALLENGE',
+    'You design and are responsible for the Solution Architecture of applications and AI platform',
+    'components in delivery',
+    'You coach software engineers on the implementation of Solution Architectures',
+    'YOUR PROFILE',
+    'At least 5 years of experience as a Lead or Senior Software Engineer, with hands-on responsibility',
+    'including practical experience with AI/ML solutions and platforms',
+    'Additional certifications are an advantage (e.g. SAFe, cloud)',
+    'English: business fluent',
+    'We are looking forward to receiving your full job application through our online application tool.',
+    'Is this not quite what you are looking for? Set up a job alert.',
+    'Similar Jobs (1)', 'Platform Owner 100% (f/m/d)', 'Posted 30+ Days Ago', '#BeExample - Join us!',
+  ].join('\n'),
+});
+eq(wd.company, 'Example Bank', 'company recovered from the Workday tenant, spelled as in the text');
+eq(wd.employment_type, 'direct_hire', '"100% (f/m/d)" → direct hire');
+eq(wd.responsibilities.length, 2, 'YOUR CHALLENGE is the responsibilities heading; wrapped line joined');
+eq(wd.requirements.map((r) => r.level), ['required', 'nice_to_have', 'required'], 'wrapped requirement joined, "an advantage" is nice-to-have, short language line kept');
+ok(!wd.requirements.some((r) => /looking forward|job alert|Platform Owner|Posted 30|#BeExample/.test(r.text)), 'page furniture after the profile is not a requirement');
+eq(companyFromAtsUrl('https://boards.greenhouse.io/acme-labs/jobs/1', 'Acme Labs is hiring'), 'Acme Labs', 'greenhouse board slug → company');
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);
