@@ -76,8 +76,11 @@ function buildExperience(entries) {
   const blocks = [];
   for (const e of entries) {
     if (!e) continue;
-    const bullets = Array.isArray(e.bullets) ? e.bullets.map(b => `            \\resumeItem{${escapeLatex(b)}}`).join('\n') : '';
-    blocks.push(`    \\resumeSubheading\n      {${escapeLatex(e.company)}}{${escapeLatex(e.dates)}}\n      {${escapeLatex(e.role)}}{${escapeLatex(e.location)}}\n      \\resumeItemListStart\n${bullets}\n      \\resumeItemListEnd`);
+    const bullets = Array.isArray(e.bullets) ? e.bullets.filter(Boolean).map(b => `            \\resumeItem{${escapeLatex(b)}}`).join('\n') : '';
+    // An earlier role listed without bullets must not open an empty list
+    // ("Something's wrong--perhaps a missing \\item" aborts the compile).
+    const list = bullets ? `\n      \\resumeItemListStart\n${bullets}\n      \\resumeItemListEnd` : '';
+    blocks.push(`    \\resumeSubheading\n      {${escapeLatex(e.company)}}{${escapeLatex(e.dates)}}\n      {${escapeLatex(e.role)}}{${escapeLatex(e.location)}}${list}`);
   }
   return blocks.join('\n\n');
 }
