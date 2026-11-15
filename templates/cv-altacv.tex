@@ -36,6 +36,13 @@
   \setmainfont{Lato}
 \else
   \usepackage[default]{lato}
+  % Ligatures (fi, fl, ffi) must extract as plain letters, or an ATS keyword
+  % search for "certified" misses "Certiﬁed" (Lato's ToUnicode maps the
+  % ligature glyphs to U+FB01..). Switch f-ligatures off; every other microtype
+  % feature stays off so line breaking (and the 2-page budget) does not move.
+  % cv-judge.mjs checks the extracted text.
+  \usepackage[protrusion=false,expansion=false,tracking=false,kerning=false,spacing=false]{microtype}
+  \DisableLigatures[f]{encoding = *, family = *}
 \fi
 
 % Body leading. The experience column is packed to the 2-page limit, so a global

@@ -8,6 +8,7 @@ How career-ops turns a job description into a decision, in plain language. Every
 | Fit vs Deal, decision, priority, next_action, hard-stop limits, language and level gaps, domain gaps, total comp | `evaluation-rules.mjs` (`enforce`) |
 | Truthful titles, guarded facts, English CV, Swiss spelling | `output-guards.mjs` (CV builder, cover-letter generator) |
 | PDF metadata, 2 pages, no open date ranges, photo margin | `cv-verify.mjs` (run by `generate-latex.mjs`) |
+| CV judged as its future readers will meet it | `cv-judge.mjs` + `modes/cv-judge.md` |
 | Apply-control detection | `liveness-core.mjs` / `check-liveness.mjs` |
 | Regression | `calibrate.mjs` golden cases |
 
@@ -66,6 +67,14 @@ These are soft gaps, each with a mitigation.
   - Ask whether it is B2B or direct hire, the rate or band, and the end client's working language.
   - Send no CV before the role is qualified.
   - Give no information about other commitments or dates.
+- **Someone inside (referral or warm introduction):** the introduction comes **before** the application.
+  1. Brief your contact with a short forwardable intro and the CV.
+  2. Your contact introduces or refers you internally. Agree a date to follow up.
+  3. Learn what the posting cannot say: why it is still open, the band, what screens people out.
+  4. Apply, naming the referral where the form allows.
+  5. Thank your contact and keep them updated.
+
+  No cold LinkedIn note. A referral is a valid reason to apply at `consider`, but it never rescues a `skip`. To mark a role, queue it with the note `referral: <who>`, or pass `--referral "<who>"` to `jd-intake.mjs` or `evaluation-rules.mjs enforce`.
 - **Skip:** no application. For an agency, send a one-line decline asking to be matched to target roles.
 
 `next_action` is an ordered checklist. Each step comes with a ready-to-paste text: ATS form answers, cover letter, LinkedIn note, first-call script, or qualification message.
@@ -116,6 +125,22 @@ After every AltaCV compile:
 - the photo keeps a right margin.
 
 A failed check fails the build. Fix the payload, then rebuild.
+
+## 9b. Judge the CV as its readers will
+
+After the build, `cv-judge.mjs` reads the PDF text exactly as an ATS gets it. Blocking findings:
+- text-extraction defects (ligatures, icon arrows that vanish);
+- the same metric three or more times.
+
+It also flags claim words that `cv.md` never uses (e.g. "live", "decade") and required JD topics that aren't visible.
+
+Then `modes/cv-judge.md` reads that text as four readers:
+- the 6-second skim: what sticks?
+- the ATS;
+- the hiring manager: the "so what?" test on every claim;
+- the skeptical interviewer: which three claims get probed, and do they hold?
+
+A demo or lab metric is not headline proof: at most once, where its context is stated. Anything blocking means revise and rebuild once; if it still fails, the CV is not used.
 
 ## 10. Liveness
 

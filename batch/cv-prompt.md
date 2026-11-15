@@ -28,6 +28,7 @@ You build ONE tailored CV PDF for a job offer that has **already been evaluated*
    - `{company-slug}` = the company from the report's Machine Summary, slugified the same way the report filename is.
    - Output paths: `output/cv-{candidate}-{company-slug}-{{DATE}}.tex` and `.pdf`.
 2. Always rebuild, even if a PDF with the same name exists (it may predate the current guards). Verify the PDF exists and is non-empty (`generate-latex.mjs` → `"compiled": true`, and the file on disk). A valid `.tex` is not a PDF. `"verified": false` is a failed build: follow the retry rule in Paso 4 step 12 of `batch/batch-prompt.md`.
+2b. Judge it per `modes/cv-judge.md` (Paso 4 step 13 of `batch/batch-prompt.md`) and add or replace the `## CV judgment` section in `{{REPORT_FILE}}`.
 3. Only if the PDF exists: in `{{REPORT_FILE}}`, replace the value of the `**PDF:**` header line with the PDF path (e.g. `**PDF:** output/cv-…-{{DATE}}.pdf`). Change nothing else in the report.
 4. Print the final JSON (the orchestrator parses it; `pdf` must be the project-relative path you verified):
 

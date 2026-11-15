@@ -36,6 +36,13 @@
   \setmainfont{Lato}
 \else
   \usepackage[default]{lato}
+  % Ligatures (fi, fl, ffi) must extract as plain letters, or an ATS keyword
+  % search for "certified" misses "Certiﬁed" (Lato's ToUnicode maps the
+  % ligature glyphs to U+FB01..). Switch f-ligatures off; every other microtype
+  % feature stays off so line breaking (and the 2-page budget) does not move.
+  % cv-judge.mjs checks the extracted text.
+  \usepackage[protrusion=false,expansion=false,tracking=false,kerning=false,spacing=false]{microtype}
+  \DisableLigatures[f]{encoding = *, family = *}
 \fi
 
 % Body leading. The experience column is packed to the 2-page limit, so a global
@@ -164,7 +171,7 @@
 \makecvheader
 
 \cvsection{About Me}
-Engineer with a focus on distributed systems and clean architecture.
+Certified engineer: cut deploy time 40\% {\,\BeginAccSupp{method=plain,ActualText={ to }}\faLongArrowAltRight\EndAccSupp{}\,} 85\% on a flagship platform.
 
 %% Bullet font. Held at \small: the experience column is at the 2-page limit and
 %% any larger size/leading spills to a 3rd page (would need trimming bullets).
@@ -177,7 +184,7 @@ Engineer with a focus on distributed systems and clean architecture.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%  LEFT COLUMN  %%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \cvsection{Experience}
-\cvevent{\textbf{Senior Engineer}}{ACME AG}{2020 - 11/2026}{Zurich, CH}
+\cvevent{\textbf{Senior Engineer, Modern Collaboration}}{ACME AG}{2020 - 11/2026}{Zurich, CH}
 \begin{itemize}
 \item Built scalable microservices with Java and Spring Boot
 \item Cut deploy time 60\%

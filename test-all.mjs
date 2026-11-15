@@ -5696,6 +5696,7 @@ for (const suite of [
   'test-output-guards.mjs',
   'test-build-verify.mjs',
   'test-calibration.mjs',
+  'test-cv-judge.mjs',
 ]) {
   const suitePath = join(ROOT, suite);
   if (!existsSync(suitePath)) { warn(`${suite} not found — skipped`); continue; }

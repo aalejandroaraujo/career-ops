@@ -145,6 +145,10 @@ If `compiled` is `false`, `verified` is `false` after the retries, or the file i
 (tracker `pdf_emoji` = `❌`) and put the error in the notes. Never report a path you
 have not confirmed exists.
 
+### Judgment (after every build)
+
+Read the result as its future readers will: `modes/cv-judge.md` (`node cv-judge.mjs <pdf> --record <jd-record>` plus the four-reader rubric). Blocking findings mean revise and rebuild once before the CV is used.
+
 ### Photo
 
 Do **not** put a photo in the payload. `build-cv-altacv.mjs` resolves it itself:

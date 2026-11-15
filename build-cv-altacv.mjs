@@ -87,7 +87,9 @@ function escapeLatex(text) {
       case '$': out.push('\\$'); break;
       case '#': out.push('\\#'); break;
       case '±': out.push('$\\pm$'); break;
-      case '→': out.push('{\\,\\faLongArrowAltRight\\,}'); break;
+      // The icon is what the eye sees; ActualText is what a parser extracts
+      // ("27% to 93%"), so an ATS never reads two bare numbers.
+      case '→': out.push('{\\,\\BeginAccSupp{method=plain,ActualText={ to }}\\faLongArrowAltRight\\EndAccSupp{}\\,}'); break;
       default: out.push(ch);
     }
   }

@@ -515,8 +515,11 @@ orchestrator flags a report whose PDF is older than the job as "CV reused".
       RAG memory, Terraform-managed and Azure-native" names five technologies and
       positions the candidate for none of them. A hiring manager reads it as "knows
       the usual tools". The tags already carry the stack.
-   3. **Never hedge a number.** "from about 27% to about 93%" softens the single
-      hardest piece of evidence in the whole CV. Write `27% → 93%`.
+   3. **Never hedge a number, and never lean on a number that means nothing to
+      the reader.** "from about 40% to about 85%" softens real evidence; write
+      `40% → 85%`. But a metric from a demo, lab or benchmark is not headline
+      proof: at most once, in the bullet that states its context, never as the
+      About proof or the first Key Achievement (`modes/cv-judge.md`, vanity-metric rule).
    4. **Do not restate the JD.** "ADAO needs agent behaviour that's predictable,
       grounded and safe at scale" hands the employer their own posting back.
       Assert the answer instead of repeating the question.
@@ -637,7 +640,12 @@ node generate-latex.mjs \
     metadata → `name` must be `config/profile.yml` full_name), rebuild, at most 2
     retries. Still `false` → PDF not generated (`❌`, error in notes). `null` = poppler
     missing in the container; proceed and note "PDF unverified".
-13. Report: .tex path, PDF path, file size, keyword coverage %, verification result
+13. **Judge the CV as its future readers will** — follow `modes/cv-judge.md`:
+    run `node cv-judge.mjs <pdf> --record <JD record>`, read ONLY its
+    `reader_text` as the 6-second skim, the ATS, the hiring manager ("so what?"
+    on every claim) and the skeptical interviewer, write `## CV judgment` in the
+    report, and if anything is blocking revise the payload and rebuild once.
+14. Report: .tex path, PDF path, file size, keyword coverage %, verification result, judgment result
 
 On success, in Paso 5 use `pdf_emoji` = `✅` and in Paso 6 set `"pdf"` to the output path.
 
