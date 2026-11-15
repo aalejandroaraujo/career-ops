@@ -344,14 +344,15 @@ export function nextActionPlan(record, decision) {
   // answer what the posting cannot (owner of the role, band, why it is open).
   // A referral is the "specific reason" that justifies applying at consider.
   if (record.channel === 'referral' && decision !== 'skip') {
-    const who = record.referral?.role || record.referral?.name || 'your contact';
+    const r = record.referral || {};
+    const who = r.name ? `${r.name}${r.role ? ` (${r.role})` : ''}` : r.role ? `your contact (${r.role})` : 'your contact';
     const formal = record.referral?.kind === 'formal';
     return [
       { kind: 'brief_referrer', step: `Brief ${who} before applying: send the forwardable intro and the tailored CV, and ask who owns the role (hiring manager / lead architect) and whether the employer's referral tool should be used before you apply`, text: 'referrer_brief+forwardable_intro' },
-      { kind: 'introduction', step: formal ? `${who} submits the internal referral; wait for the referral link or confirmation` : `${who} introduces you to the role owner through her internal contacts; agree a date to follow up if nothing moves`, text: null },
+      { kind: 'introduction', step: formal ? `${who} submits the internal referral; wait for the referral link or confirmation` : `${who} introduces you to the role owner through their internal contacts; agree a date to follow up if nothing moves`, text: null },
       { kind: 'ask_insider', step: 'Through the introduction, learn what the posting cannot say: why the role is still open, the band, what really screens candidates out', text: 'insider_questions' },
       { kind: 'apply', step: `Apply via the ${record.channel === 'referral' && record.url ? 'company ATS' : 'posting'}${record.url ? ` (${record.url})` : ''} once the introduction is made, naming the referral where the form allows it`, text: 'ats_answers+cover_letter' },
-      { kind: 'thank_referrer', step: `Tell ${who} you have applied and thank her; keep her updated at each stage`, text: null },
+      { kind: 'thank_referrer', step: `Tell ${who} you have applied and thank them; keep them updated at each stage`, text: null },
       { kind: 'first_call', step: 'First call: band and working-language questions use the first-call script (Block F)', text: 'first_call_script' },
     ];
   }
