@@ -9,7 +9,7 @@
 
 import {
   BVG, compScoreFromTotal, domainGapIndustry, profileIndustries, targetBand, totalComp,
-  THRESHOLDS, candidateLanguageLevel, decide, dealScore, enforceReport, fitScore, isForbiddenNextAction,
+  THRESHOLDS, writtenOutreachText, candidateLanguageLevel, decide, dealScore, enforceReport, fitScore, isForbiddenNextAction,
   languageGap, levelGap, levelRank, nextActionPlan, patchTsv, priorityOf, readSummary, requiredLanguageLevel,
 } from './evaluation-rules.mjs';
 
@@ -190,6 +190,28 @@ const re = enforceReport(report, { record: refRecord, profile });
 ok(/^Brief your contact \(executive assistant in IT\)/.test(readSummary(re.md).next_action[0]), 'enforce rewrites next_action for the referral path');
 const unk = enforceReport(report.replace('final_decision: "Consider"', 'final_decision: "Consider"\nemployment_type: "direct_hire"'), { record: { ...directHire, employment_type: 'unknown' }, profile });
 eq(readSummary(unk.md).employment_type, 'direct_hire', 'a worker correction survives when the parser said unknown');
+
+console.log('\n11. Ready-to-paste texts are linted, spoken answers are not');
+const withOutreach = `${report}
+## Next action (checklist)
+
+1. [ ] Apply
+
+### Cover letter
+> Two things I would rather name than have you find. I have not worked inside a SAFe ART.
+
+### First-call script
+> "I'd rather name that now than have you discover it in week three."
+
+## F) Interview Plan
+| Q | "I'd rather name that now than have you find it." |
+`;
+ok(!/First-call script|Interview Plan/.test(writtenOutreachText(withOutreach)), 'first-call script and Block F are excluded from written outreach');
+const wo = enforceReport(withOutreach, { record: directHire, profile });
+ok((readSummary(wo.md).outreach_issues || []).length > 0, 'volunteered gaps in the letter are flagged');
+const spokenOnly = enforceReport(withOutreach.replace(/> Two things[^\n]*/, '> I designed and built the platform end to end.'), { record: directHire, profile });
+ok(!readSummary(spokenOnly.md).outreach_issues, 'the same phrasing in the first-call script and Block F is not flagged');
+ok(wo.result.corrections.some((c) => /ready-to-paste text: volunteered gap/.test(c)), 'reported as corrections');
 
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

@@ -35,6 +35,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import yaml from 'js-yaml';
 import { buildRecord } from './jd-intake.mjs';
+import { confessionFindings } from './output-guards.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 
@@ -541,6 +542,15 @@ export function enforceReport(md, ctx = {}) {
     corrections.push('next_action replaced: decision is skip');
   }
 
+  // Written outreach (cover letter, LinkedIn note, form answers, forwardable
+  // intro) must not volunteer gaps; Block F's spoken answers may.
+  const outreach = writtenOutreachText(md);
+  const outreachIssues = confessionFindings(outreach);
+  if (outreachIssues.length) {
+    summary.outreach_issues = outreachIssues;
+    corrections.push(...outreachIssues.map((m) => `ready-to-paste text: ${m}`));
+  } else if (summary.outreach_issues) delete summary.outreach_issues;
+
   Object.assign(summary, {
     score: fit,
     fit_score: fit,
@@ -567,6 +577,20 @@ export function enforceReport(md, ctx = {}) {
   else out = out.replace(/(\n---\n)/, `$1\n${box}`);
 
   return { md: out, result: { fit_score: fit, deal_score: deal, decision, priority, corrections } };
+}
+
+/**
+ * The report's ready-to-paste written texts: everything under "Next action
+ * (checklist)" up to the next top-level section, minus any first-call script
+ * (spoken). Block F is not included.
+ */
+export function writtenOutreachText(md) {
+  const start = md.search(/^## Next action/m);
+  if (start < 0) return '';
+  const rest = md.slice(start + 3);
+  const end = rest.search(/^## /m);
+  const block = end < 0 ? rest : rest.slice(0, end);
+  return block.replace(/### First-call script[\s\S]*?(?=\n### |$)/i, '');
 }
 
 /** Token overlap of two phrases (share of the shorter phrase's significant words). */

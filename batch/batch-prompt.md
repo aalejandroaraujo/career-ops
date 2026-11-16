@@ -175,7 +175,7 @@ If the industry is listed there, it is NOT a gap: cite the named customers inste
 1. Is it a hard blocker or a nice-to-have? (A `nice_to_have` item in the JD record is never a hard blocker.)
 2. Can the candidate demonstrate adjacent experience?
 3. Is there a portfolio project that covers this gap?
-4. Concrete mitigation plan
+4. Concrete mitigation plan. Mitigation is SPOKEN: it goes in Block F (red-flag answers) and the first-call script. Never plan to "name the gap" in the cover letter, LinkedIn note, forwardable intro or ATS free-text answers; written outreach says what the candidate brings, not what they lack (`modes/cover.md` Step 5; `output-guards.mjs` rejects confessional phrasing, `evaluation-rules.mjs` flags it in ready-to-paste texts).
 
 #### Block C — Level and Strategy
 
@@ -396,7 +396,7 @@ Where `{company-slug}` is the company name in lowercase, without spaces, with hy
 ...
 
 Ready-to-paste texts for every step that needs one (omit those that do not apply):
-- **ATS form answers** (motivation, salary expectation phrased as a range consistent with `modes/_profile.md`, availability, work permit)
+- **ATS form answers** (motivation, salary expectation phrased as a range consistent with `modes/_profile.md`, availability, work permit). A direct yes/no screening question is answered briefly and factually from the positive side, with no apology or promise.
 - **Cover letter** (JD language when not English; see language rules)
 - **LinkedIn note** to the named contact (< 300 characters, JD language)
 - **First-call script** (also in Block F)

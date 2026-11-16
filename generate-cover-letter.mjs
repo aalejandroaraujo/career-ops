@@ -13,7 +13,7 @@
  * without loading Playwright (renderHtmlToPdf is imported lazily inside main).
  */
 
-import { checkGuards, loadFactGuards, loadProfile, mapStrings, swissSpelling } from "./output-guards.mjs";
+import { checkGuards, confessionFindings, loadFactGuards, loadProfile, mapStrings, swissSpelling } from "./output-guards.mjs";
 import { readFileSync, existsSync, mkdirSync } from "fs";
 import { dirname, resolve, basename, join } from "path";
 import { fileURLToPath, pathToFileURL } from "url";
@@ -191,7 +191,10 @@ Usage:
     payload = { ...payload, letter: mapStrings(payload.letter, swissSpelling) };
   }
   // Guarded facts (config/profile.yml canonical_facts) never reach a letter.
-  const guardErrors = checkGuards(JSON.stringify(payload.letter || {}), loadFactGuards(loadProfile()));
+  // ...nor does a volunteered gap ("I have not worked in X", "I'd rather name
+  // that now than have you find it"): those are spoken interview answers.
+  const letterText = Object.values(payload.letter || {}).flat().map((v) => (typeof v === "object" && v ? Object.values(v).join(" ") : String(v ?? ""))).join("\n");
+  const guardErrors = [...checkGuards(letterText, loadFactGuards(loadProfile())), ...confessionFindings(letterText)];
   if (guardErrors.length) {
     console.error(`ERROR: cover letter rejected by output guards:\n${guardErrors.map((e) => `  ✗ ${e}`).join("\n")}`);
     process.exit(1);

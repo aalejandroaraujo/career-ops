@@ -115,6 +115,15 @@ Every assumption is written down. Base and total are reported separately, along 
   - state the level once and explicitly (German "B1, B2 in progress");
   - Swiss employers get Swiss spelling ("ss", never "ß").
 
+## 8b. Gaps are spoken, never written
+
+Cover letters, LinkedIn notes, forwardable intros and ATS free-text answers say what the candidate brings. They never volunteer a gap ("I have not worked in…", "would be a new domain for me"), never promise remedies nobody asked for ("I'd take the certification in my first quarter"), and never use the confessional frame "I'd rather name that now than have you find it". That frame works only in person, in answer to a question, so it lives in Block F and the first-call script.
+
+- A direct yes/no screening question gets a short, factual answer from the positive side.
+- The only written exception is the candidate's language level, stated once.
+- `generate-cover-letter.mjs` refuses a letter that breaks this.
+- `evaluation-rules.mjs` flags it in a report's ready-to-paste texts (`outreach_issues`).
+
 ## 9. Build checks on the CV
 
 After every AltaCV compile:
