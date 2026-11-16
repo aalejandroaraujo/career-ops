@@ -143,11 +143,12 @@ After the build, `cv-judge.mjs` reads the PDF text exactly as an ATS gets it. Bl
 
 It also flags claim words that `cv.md` never uses (e.g. "live", "decade") and required JD topics that aren't visible.
 
-Then `modes/cv-judge.md` reads that text as four readers:
+Then `modes/cv-judge.md` reads that text as five readers:
 - the 6-second skim: what sticks?
 - the ATS;
 - the hiring manager: the "so what?" test on every claim;
 - the skeptical interviewer: which three claims get probed, and do they hold?
+- the receiver: who they think this is, which details invite a negative inference, and what `cv.md` holds that the CV undersells. Overclaiming and underselling are both failures.
 
 A demo or lab metric is not headline proof: at most once, where its context is stated. Anything blocking means revise and rebuild once; if it still fails, the CV is not used.
 

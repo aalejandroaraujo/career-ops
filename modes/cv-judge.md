@@ -12,7 +12,7 @@ node cv-judge.mjs output/cv-{candidate}-{slug}-{date}.pdf --record <jd-record.js
 - `blocking` findings (ATS extraction defects, a metric repeated three or more times) must be fixed before the CV is used.
 - `review` findings (claim words not found in `cv.md`, required topics not visible) must each be resolved: either fixed, or kept with a one-line reason in the judgment.
 
-## 2. Read it as four readers, in order
+## 2. Read it as five readers, in order
 
 Read only `reader_text` and the JD record. Write each reader's verdict in one or two sentences, then the findings.
 
@@ -28,6 +28,14 @@ Read only `reader_text` and the JD record. Write each reader's verdict in one or
 
 **D. The skeptical interviewer.** Name the three claims you would probe first. For each: does `cv.md` back it at the strength written? If a fair question would shrink the claim ("so it was a demo?", "did you lead the team or advise it?", "is the app still live?"), the CV must already say it at the shrunk size. Over-claiming is blocking.
 
+**E. The receiver (perception and underselling).** Read the rendered pages as the person the CV is actually sent to: who they are (hiring manager, lead architect, recruiter), how it reaches them (cold ATS, referral, forwarded by a colleague), and what travels with it (cover letter). Then:
+- *What kind of professional do they think this is after 10 and 60 seconds?* If the answer is a lesser version of the candidate (a trainer instead of an architect, a consultant between jobs, a failed founder), find the words on the page that produce that read.
+- *Negative inferences:* dates, titles, endings ("concluded the venture"), personal details and layout choices that invite a doubt the candidate would never write. Say whether each actually hurts with THIS receiver.
+- *Underselling:* what in `cv.md` would make this receiver more interested but is missing, buried or worded below its strength. Rank by impact. The same truth rules apply: only what `cv.md` supports.
+- *Consistency:* the CV and the cover letter tell one story, without contradictions or copy-paste repetition.
+
+Overclaiming and underselling are both failures; the judgment checks for both.
+
 ## 3. Verdict
 
 Write a `## CV judgment` section in the report:
@@ -41,6 +49,7 @@ Write a `## CV judgment` section in the report:
 | ATS | … required topics on page one x/y, defects |
 | Hiring manager | … which proofs land, which are decoration |
 | Interviewer | … the three claims probed first, and whether they hold |
+| Receiver | … who they think this is, negative inferences, what is undersold |
 
 **Blocking:** … (none / list)
 **Changed after judgment:** … (what was rewritten and why)
