@@ -61,6 +61,10 @@ if (has('pdfinfo') && has('pdftotext') && has('pdftoppm')) {
   const tex = readFileSync(`${FIX}.tex`, 'utf8');
   ok(/\\hypersetup\{unicode,pdfauthor=\{Test Candidate\}/.test(tex), 'builder fills hyperref metadata from the payload name');
   ok(/\\hspace\*\{1\.2cm\}/.test(readFileSync('templates/cv-altacv.tex', 'utf8')), 'template keeps the photo spacer with \\hspace* (survives \\par)');
+  const ovf = verifyCvPdf('test-fixtures/cv-verify/sample-overflow.pdf', { texPath: 'test-fixtures/cv-verify/sample-overflow.tex', expectPages: 1 });
+  ok(!ovf.ok && ovf.errors.some((e) => /runs into the right margin/.test(e)), 'a skill tag running off the page fails the build');
+  ok(good.checks.text_overflow.length === 0, 'the normal fixture has no overflow');
+  ok(/B1, B2 in progress/.test(readFileSync('test-fixtures/cv-verify/sample-overflow.tex', 'utf8')), 'a plain-text language label renders as text, not dots');
 } else console.log('  ⚠️  poppler-utils not installed — PDF fixture checks skipped');
 ok(verifyCvPdf('does-not-exist.pdf').ok === false, 'missing PDF fails');
 

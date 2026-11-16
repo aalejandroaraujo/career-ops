@@ -28,6 +28,8 @@ import { pathToFileURL } from 'node:url';
 export const EXPECTED_PAGES = 2;
 /** Minimum gap between the photo's right edge and the page edge (A4 width 210mm). */
 export const MIN_PHOTO_RIGHT_MARGIN_MM = 15;
+/** Text must stay inside the 1cm page margin; allow ~3mm of slack for glyph overhang. */
+export const MIN_TEXT_RIGHT_MARGIN_PT = 20;
 
 // "02/2026 - Present", "2024 – heute", "seit 2023 - aktuell"
 export const OPEN_DATE_RANGE = /(?:\b\d{1,2}[./])?\b(?:19|20)\d{2}\s*[-–—]+\s*(present|current|now|today|heute|aktuell|jetzt|ongoing|actuel|aujourd'hui)\b/i;
@@ -138,6 +140,22 @@ export function verifyCvPdf(pdfPath, opts = {}) {
     checks.open_date_range = hit ? hit[0] : null;
     if (hit) errors.push(`open date range "${hit[0]}" in the PDF: every role needs an end date (build-cv-altacv resolves "Present" to MM/YYYY)`);
   } else warnings.push('pdftotext not installed: date-range check skipped');
+
+  // 3b. Nothing runs into the right margin (a long skill tag once ran off
+  // the page: "Azure (Functions, … Entra ID, AP" with the rest cut).
+  if (tool('pdftotext')) {
+    const bbox = execFileSync('pdftotext', ['-bbox', pdfPath, '-'], { encoding: 'utf8', maxBuffer: 32 << 20 });
+    const overflow = [];
+    let width = 0; let page = 0;
+    for (const line of bbox.split('\n')) {
+      const pm = line.match(/<page width="([\d.]+)"/);
+      if (pm) { width = Number(pm[1]); page++; continue; }
+      const wm = line.match(/<word xMin="[\d.]+" yMin="[\d.]+" xMax="([\d.]+)" yMax="[\d.]+">([^<]*)<\/word>/);
+      if (wm && width && Number(wm[1]) > width - MIN_TEXT_RIGHT_MARGIN_PT) overflow.push(`p${page} "${wm[2]}"`);
+    }
+    checks.text_overflow = overflow.slice(0, 5);
+    if (overflow.length) errors.push(`text runs into the right margin or off the page: ${overflow.slice(0, 4).join(', ')} — shorten that line or tag`);
+  }
 
   // 4. Photo keeps a right margin
   if (expectPhoto === false) checks.photo_right_margin_mm = 'no photo';

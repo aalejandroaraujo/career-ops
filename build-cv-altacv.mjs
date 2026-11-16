@@ -192,6 +192,11 @@ function buildEducation(entries) {
 function buildLanguages(entries) {
   if (!Array.isArray(entries) || entries.length === 0) return '';
   return entries.filter(Boolean).map(l => {
+    // A plain-text level ("B1, B2 in progress", "native") reads better than
+    // dots when the letter states a CEFR level: 3/5 next to "B1" looks inflated.
+    if (typeof l.label === 'string' && l.label.trim()) {
+      return `{\\small\\textcolor{emphasis}{\\textbf{${escapeLatex(l.name)}}}}\\hfill{\\small ${escapeLatex(l.label)}}\\par`;
+    }
     let lvl = Number(l.level);
     if (!Number.isFinite(lvl)) lvl = 3;
     lvl = Math.max(0, Math.min(5, Math.round(lvl)));
