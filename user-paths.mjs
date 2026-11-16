@@ -42,6 +42,7 @@ export const USER_PATHS = [
   /^reports\//,
   /^output\//,
   /^jds\//,
+  /^calibration\//,
   /^interview-prep\//,
   /^writing-samples\//,
   /^assets\//,

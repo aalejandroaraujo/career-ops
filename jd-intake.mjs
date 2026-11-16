@@ -18,7 +18,7 @@
  *
  * CLI:
  *   node jd-intake.mjs <file|-> [--source url|paste|file|screenshot|email|batch]
- *                      [--url <url>] [--out record.json] [--text-out jd.txt]
+ *                      [--url <url>] [--referral "role[|name][|formal]"] [--out record.json] [--text-out jd.txt]
  *   `-` reads pasted text from stdin. Prints the record as JSON when --out is absent.
  */
 
@@ -224,18 +224,18 @@ export function normalizeText(text) {
 // ── section parsing ──────────────────────────────────────────────────────────
 
 const HEADINGS = {
-  responsibilities: /^(?:(?:dein|deine|ihr|ihre|your|the)\s+)?(?:verantwortungsbereich|aufgaben(?:gebiet|bereich)?|tätigkeiten|tasks|responsibilities|role|impact|missions?|vos missions|tes missions|was dich erwartet|das erwartet dich|what you(?:'ll| will) do|herausforderung(?:en)?|aufgabe)\b.{0,30}$/i,
+  responsibilities: /^(?:(?:dein|deine|ihr|ihre|your|the)\s+)?(?:verantwortungsbereich|aufgaben(?:gebiet|bereich)?|tätigkeiten|tasks|responsibilities|role|impact|missions?|mission|challenges?|vos missions|tes missions|was dich erwartet|das erwartet dich|what you(?:'ll| will) do|herausforderung(?:en)?|aufgabe)\b.{0,30}$/i,
   requirements: /^(?:(?:dein|deine|ihr|ihre|your|votre|ton)\s+)?(?:profil|profile|st(?:ä|a|i|ii)rken|kompetenzen|qualifikation(?:en)?|qualifications|requirements|anforderungen|voraussetzungen|was du mitbringst|das bringst du mit|what you bring|about you|muss-kriterien|soll-kriterien|kann-kriterien|must[- ]haves?|nice[- ]to[- ]haves?|what we(?:'re| are) looking for|who you are)\b.{0,30}$/i,
   benefits: /^(?:(?:deine|ihre|your|unsere|our)\s+)?(?:benefits|vorteile|was wir (?:dir|ihnen) bieten|wir bieten|unser angebot|what we offer|perks|avantages|nous offrons|anstellungsbedingungen.*)$/i,
   contact: /^(?:(?:dein|deine|ihr|ihre|your)\s+)?(?:kontakt|kontaktperson|ansprechperson|ansprechpartner(?:in)?|contact|recruiter)$/i,
   location: /^(?:(?:dein|ihr|your)\s+)?(?:arbeitsort|standort|location|lieu de travail|einsatz(?:ort)?)$/i,
-  stop: /^(?:über uns|about us|über .{2,40}|à propos.*|wer wir sind|who we are|unternehmen|company)$/i,
+  stop: /^(?:über uns|about us|über .{2,40}|à propos.*|wer wir sind|who we are|unternehmen|company|similar jobs.*|ähnliche (?:jobs|stellen).*|follow us|folge uns|we are looking forward to .*|wir freuen uns auf .*|is this not quite what you are looking for.*|posted \d+\+? days? ago|#\S+.*)$/i,
 };
 
 /** Short marketing taglines ("Potenziale leben") are layout, not content. */
-const isContentLine = (l) => l.length >= 8 && l.split(/\s+/).length >= 4;
+const isContentLine = (l) => l.length >= 8 && (l.split(/\s+/).length >= 4 || /\b(english|german|deutsch|englisch|french|französisch|français|italian|italienisch)\b/i.test(l));
 
-const NICE_TO_HAVE = /\b(von vorteil|wünschenswert|idealerweise|ideally|nice[- ]to[- ]have|a plus|is a bonus|bonus points|preferred|soll-kriter|kann-kriter|un atout|apprécié|souhaité|optional)\b/i;
+const NICE_TO_HAVE = /\b(von vorteil|(?:is |are )?an advantage|advantageous|wünschenswert|idealerweise|ideally|nice[- ]to[- ]have|a plus|is a bonus|bonus points|preferred|soll-kriter|kann-kriter|un atout|apprécié|souhaité|optional)\b/i;
 
 /** Umlaut/OCR-tolerant fold: "Deine Stärken", "Deine Starken" and OCR's "Deine Stiirken" all match. */
 function foldChars(s) {
@@ -245,7 +245,9 @@ const fold = (line) => foldChars(line.replace(/ii/g, 'ü'));
 const FOLDED_HEADINGS = Object.fromEntries(Object.entries(HEADINGS).map(([k, re]) => [k, new RegExp(foldChars(re.source), 'i')]));
 
 function classifyHeading(line) {
-  if (line.length > 60 || line.startsWith('• ')) return null;
+  if (line.startsWith('• ')) return null;
+  // Page furniture that ends the job content can be a long sentence.
+  if (line.length > 60) return HEADINGS.stop.test(line) && line.length <= 200 ? 'stop' : null;
   const folded = fold(line);
   for (const key of ['responsibilities', 'requirements', 'benefits', 'contact', 'location', 'stop']) {
     if (HEADINGS[key].test(line) || FOLDED_HEADINGS[key].test(folded)) return key;
@@ -267,7 +269,15 @@ export function sections(text) {
       cur = { key: key === 'stop' ? 'preamble' : key, heading: line, items: [] };
       continue;
     }
-    cur.items.push(line.replace(/^• /, ''));
+    const item = line.replace(/^• /, '');
+    const prev = cur.items[cur.items.length - 1];
+    // PDF/OCR wraps one bullet over several lines; a line that starts in lower
+    // case (and is not itself a bullet) continues the previous item.
+    if (prev !== undefined && !line.startsWith('• ') && /^[a-zäöüéèà(]/.test(item) && !/[.!?:]$/.test(prev)) {
+      cur.items[cur.items.length - 1] = `${prev} ${item}`;
+      continue;
+    }
+    cur.items.push(item);
   }
   flush();
   return out;
@@ -306,6 +316,11 @@ export function detectEmploymentType(text) {
   if (/\b(freelance|freelancer|contractor|b2b|day rate|tagessatz|stundensatz|hourly rate|per hour|\/h\b|auftragsbasis|selbständig|self-employed|ltd company|outside ir35|inside ir35|contract role|contract position|mandat)\b/i.test(text)) return 'contract_b2b';
   if (/\b(festanstellung|unbefristet|permanent|full[- ]time employee|employee benefits|pensionskasse|bvg|vorsorge und sozialleistungen|cdi\b|pensum)\b/i.test(text)) return 'direct_hire';
   if (/\b\d{2,3}\s*[-–]\s*\d{2,3}\s*%/.test(text)) return 'direct_hire'; // Swiss Pensum = employment
+  // A single Pensum next to the gender marker ("(w/m/d) 100%"), or an in-house
+  // Talent Acquisition / HR contact, is a company hiring for itself.
+  if (/\((?:w\/m\/d|m\/w\/d|m\/f\/d|f\/m\/d|h\/f|f\/h)\)[^\n]{0,20}\b\d{2,3}\s*%/i.test(text)) return 'direct_hire';
+  if (/\b\d{2,3}\s*%\s*\((?:w\/m\/d|m\/w\/d|m\/f\/d|f\/m\/d|h\/f|f\/h)\)/i.test(text)) return 'direct_hire';
+  if (/\b(talent acquisition (?:partner|specialist|manager)|hr business partner|recruiting partner)\b/i.test(text)) return 'direct_hire';
   return 'unknown';
 }
 
@@ -387,6 +402,34 @@ function detectLocation(secs, text) {
 
 const TITLE_SIGNAL = /\((?:w\/m\/d|m\/w\/d|m\/f\/d|f\/m\/d|all genders|h\/f|f\/h|m\/w)\)|\b\d{2,3}\s*[-–]\s*\d{2,3}\s*%|\b(engineer|entwickler\S*|developer|architect\S*|architekt\S*|manager\S*|consultant|berater\S*|specialist|spezialist\S*|lead|analyst|scientist|owner|director|head of|ingénieur|ingenieur\S*|administrator|designer|expert\S*)\b/i;
 
+/**
+ * Company from an ATS tenant in the URL (juliusbaer.wd3.myworkdayjobs.com,
+ * boards.greenhouse.io/acme, jobs.lever.co/acme, jobs.ashbyhq.com/acme). The
+ * tenant slug is matched back to the spelling used in the text ("Julius Baer")
+ * when one exists.
+ */
+export function companyFromAtsUrl(url, text = '') {
+  let slug = null;
+  try {
+    const u = new URL(url || '');
+    const host = u.hostname.replace(/^www\./, '');
+    const seg = u.pathname.split('/').filter(Boolean)[0] || '';
+    if (/\.myworkdayjobs\.com$/.test(host)) slug = host.split('.')[0];
+    else if (/^(boards|job-boards)\.greenhouse\.io$|^jobs\.lever\.co$|^jobs\.ashbyhq\.com$|^apply\.workable\.com$/.test(host)) slug = seg;
+    else if (/\.(recruitee|teamtailor|personio)\.\w+$/.test(host)) slug = host.split('.')[0];
+  } catch { return null; }
+  if (!slug) return null;
+  const key = slug.toLowerCase().replace(/[^a-z0-9]/g, '');
+  const words = String(text).match(/\b[A-ZÄÖÜ][\wäöüé&'.-]*(?:\s+[A-ZÄÖÜ][\wäöüé&'.-]*){0,3}/g) || [];
+  for (const w of words) {
+    for (let n = 1; n <= 4; n++) {
+      const cand = w.split(/\s+/).slice(0, n).join(' ');
+      if (cand.toLowerCase().replace(/[^a-z0-9]/g, '') === key) return cand;
+    }
+  }
+  return slug.replace(/[-_]+/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
 function stripTitleNoise(t) {
   return t.replace(/^#+\s*/, '').replace(/^\[[^\]]+\]\s*/, '').replace(/\s+[-–—|]\s+(?:jobs?|karriere|careers?)\b.*$/i, '').trim();
 }
@@ -422,6 +465,7 @@ function detectTitleCompany(text, hints) {
     const m = text.match(/\b([A-ZÄÖÜ][\w&.\- ]{1,40}?\s(?:AG|SA|GmbH|Ltd|Inc\.?|S\.A\.|SE|plc|LLC|Sàrl))\b/);
     company = m ? m[1].trim() : null;
   }
+  if (!company) company = companyFromAtsUrl(hints.url, text);
   return { title: title || null, company: company || null };
 }
 
@@ -545,6 +589,14 @@ async function main() {
     process.exit(2);
   }
   const rec = intakeFile(input, { sourceType: source, url: argOf(args, '--url') || null });
+  // --referral "role[|name][|formal]": the user knows someone inside. Channel
+  // is a fact about how the candidate reaches the role, not about the page.
+  const ref = argOf(args, '--referral');
+  if (ref) {
+    const [role, name, kind] = ref.split('|').map((x) => x?.trim() || null);
+    rec.channel = 'referral';
+    rec.referral = { role, name, kind: kind === 'formal' ? 'formal' : 'warm_intro' };
+  }
   const out = argOf(args, '--out');
   const textOut = argOf(args, '--text-out');
   if (textOut) writeFileSync(textOut, rec.raw_text + '\n');

@@ -1,0 +1,14 @@
+name: bank-copilot-engineer-german-c1
+note: A mandatory language level above the candidate's ("Deutsch C1 zwingend" vs B1) is the one language hard stop.
+context: fixture
+jd: jd.md
+report: report.md
+expect:
+  record:
+    employment_type: direct_hire
+    language: de
+  fit_score: 4.3
+  decision: skip
+  report_required:
+    - "German C1 required"
+history: []

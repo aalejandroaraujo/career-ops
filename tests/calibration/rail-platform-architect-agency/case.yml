@@ -1,0 +1,24 @@
+name: rail-platform-architect-agency
+note: >-
+  Synthetic analog of an agency (Personalverleih) platform-architect mandate
+  whose report turned Soll-Kriterien (OpenShift, Argo CD, Helm) and an unstated
+  German level into hard stops. Agency roles keep qualify-first next_action.
+context: fixture
+jd: jd.md
+report: report.md
+expect:
+  record:
+    employment_type: agency
+    channel: recruiter
+    language: de
+  fit_score: 4.0
+  decision: apply
+  priority: low
+  hard_stops: none
+  next_action_first: "B2B or direct hire|Qualify"
+  report_required:
+    - "demoted from hard stop"
+    - "Decision: APPLY"
+  report_forbidden:
+    - "Overqualified / age-band read"
+history: []

@@ -175,7 +175,7 @@ If the industry is listed there, it is NOT a gap: cite the named customers inste
 1. Is it a hard blocker or a nice-to-have? (A `nice_to_have` item in the JD record is never a hard blocker.)
 2. Can the candidate demonstrate adjacent experience?
 3. Is there a portfolio project that covers this gap?
-4. Concrete mitigation plan
+4. Concrete mitigation plan. Mitigation is SPOKEN: it goes in Block F (red-flag answers) and the first-call script. Never plan to "name the gap" in the cover letter, LinkedIn note, forwardable intro or ATS free-text answers; written outreach says what the candidate brings, not what they lack (`modes/cover.md` Step 5; `output-guards.mjs` rejects confessional phrasing, `evaluation-rules.mjs` flags it in ready-to-paste texts).
 
 #### Block C — Level and Strategy
 
@@ -396,7 +396,7 @@ Where `{company-slug}` is the company name in lowercase, without spaces, with hy
 ...
 
 Ready-to-paste texts for every step that needs one (omit those that do not apply):
-- **ATS form answers** (motivation, salary expectation phrased as a range consistent with `modes/_profile.md`, availability, work permit)
+- **ATS form answers** (motivation, salary expectation phrased as a range consistent with `modes/_profile.md`, availability, work permit). A direct yes/no screening question is answered briefly and factually from the positive side, with no apology or promise.
 - **Cover letter** (JD language when not English; see language rules)
 - **LinkedIn note** to the named contact (< 300 characters, JD language)
 - **First-call script** (also in Block F)
@@ -461,6 +461,12 @@ The orchestrator runs the same command again after you exit; it is idempotent.
 
 **If score ≥ threshold**, generate the tailored PDF:
 
+**Always build; never reuse.** Even when `output/` already holds a CV for this
+company and date, run steps 10-12 again. The build is where the output guards
+(truthful titles, guarded facts, English CV) and the PDF verification run; a CV
+built before the current rules can carry exactly the defects they block. The
+orchestrator flags a report whose PDF is older than the job as "CV reused".
+
 1. Read `cv.md` + `config/profile.yml`
 2. Extract 15-20 keywords from the JD
 3. **The CV is always in English**, whatever the JD language (`output-guards.mjs`
@@ -509,8 +515,11 @@ The orchestrator runs the same command again after you exit; it is idempotent.
       RAG memory, Terraform-managed and Azure-native" names five technologies and
       positions the candidate for none of them. A hiring manager reads it as "knows
       the usual tools". The tags already carry the stack.
-   3. **Never hedge a number.** "from about 27% to about 93%" softens the single
-      hardest piece of evidence in the whole CV. Write `27% → 93%`.
+   3. **Never hedge a number, and never lean on a number that means nothing to
+      the reader.** "from about 40% to about 85%" softens real evidence; write
+      `40% → 85%`. But a metric from a demo, lab or benchmark is not headline
+      proof: at most once, in the bullet that states its context, never as the
+      About proof or the first Key Achievement (`modes/cv-judge.md`, vanity-metric rule).
    4. **Do not restate the JD.** "ADAO needs agent behaviour that's predictable,
       grounded and safe at scale" hands the employer their own posting back.
       Assert the answer instead of repeating the question.
@@ -558,6 +567,9 @@ The orchestrator runs the same command again after you exit; it is idempotent.
    of things *shipped to and run in production* ABOVE evaluation, benchmark or demo
    metrics: in the About block's proof sentence, in Key Achievements (first item),
    and in the first bullet of each role.
+   **Dates:** pass each role's dates from cv.md verbatim ("01/2024 - Present");
+   the builders render an ongoing role as "since 01/2024". Never pre-resolve
+   "Present" to the current month.
    **Truthful titles:** `experience[].role` and `previous_experience[].role` are
    copied from cv.md unchanged (the bold line under each employer). Never rename a
    role to match JD keywords. Consecutive roles at one employer may share an entry
@@ -631,7 +643,12 @@ node generate-latex.mjs \
     metadata → `name` must be `config/profile.yml` full_name), rebuild, at most 2
     retries. Still `false` → PDF not generated (`❌`, error in notes). `null` = poppler
     missing in the container; proceed and note "PDF unverified".
-13. Report: .tex path, PDF path, file size, keyword coverage %, verification result
+13. **Judge the CV as its future readers will** — follow `modes/cv-judge.md`:
+    run `node cv-judge.mjs <pdf> --record <JD record>`, read ONLY its
+    `reader_text` as the 6-second skim, the ATS, the hiring manager ("so what?"
+    on every claim) and the skeptical interviewer, write `## CV judgment` in the
+    report, and if anything is blocking revise the payload and rebuild once.
+14. Report: .tex path, PDF path, file size, keyword coverage %, verification result, judgment result
 
 On success, in Paso 5 use `pdf_emoji` = `✅` and in Paso 6 set `"pdf"` to the output path.
 

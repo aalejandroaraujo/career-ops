@@ -315,8 +315,10 @@ async function main() {
   // no open "- Present" ranges, photo off the page edge. A failed check fails
   // the build (exit 1, verified:false) — compiled-but-wrong is not a CV to send.
   // Pass --no-verify only for a deliberately non-standard document.
-  if (report.compiled && report.pdf && profileId === 'altacv' && !process.argv.includes('--no-verify')) {
-    const v = verifyCvPdf(report.pdf.path, { texPath: absPath });
+  // The single-column (classic / ATS) CV gets the same checks except the photo,
+  // with "at most 2 pages" instead of exactly 2.
+  if (report.compiled && report.pdf && !process.argv.includes('--no-verify')) {
+    const v = verifyCvPdf(report.pdf.path, profileId === 'altacv' ? { texPath: absPath } : { texPath: absPath, maxPages: 2, expectPhoto: false });
     // null = no poppler tools, nothing could be checked (rebuild the container).
     report.verified = v.skipped ? null : v.ok;
     report.verification = v;

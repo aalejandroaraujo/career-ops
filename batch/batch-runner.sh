@@ -599,13 +599,17 @@ process_offer() {
   rm -f "$jd_record"
   local intake_source="url"
   [[ "$source" =~ (scout|scan) ]] && intake_source="batch"
+  # A queue note "referral: <role or name>" marks a role the user has someone
+  # inside for; the rules then plan the introduction before the application.
+  local intake_ref=()
+  if [[ "$notes" =~ [Rr]eferral:[[:space:]]*([^;]+) ]]; then intake_ref=(--referral "${BASH_REMATCH[1]}"); fi
   if [[ "$url" =~ ^local:jds/ ]]; then
     local local_jd="$PROJECT_DIR/jds/${url#local:jds/}"
     if [[ -f "$local_jd" ]]; then
       local local_source=""
       [[ "$notes" =~ (jd-text|paste) && "$local_jd" =~ \.(md|txt)$ ]] && local_source="--source paste"
       # shellcheck disable=SC2086
-      if node "$PROJECT_DIR/jd-intake.mjs" "$local_jd" $local_source --out "$jd_record" --text-out "$jd_file" >>"$log_file" 2>&1; then
+      if node "$PROJECT_DIR/jd-intake.mjs" "$local_jd" $local_source "${intake_ref[@]}" --out "$jd_record" --text-out "$jd_file" >>"$log_file" 2>&1; then
         echo "    📄 Using cached JD: ${url#local:jds/} (canonical record written)"
       else
         echo "    ⚠️  Local JD unreadable or too thin: ${url#local:jds/} — worker will read the file itself"
@@ -616,7 +620,7 @@ process_offer() {
     fi
   elif node "$PROJECT_DIR/fetch-jd.mjs" "$url" --out "$jd_file" --pdf-dir "$PROJECT_DIR/jds" >>"$log_file" 2>&1; then
     echo "    📥 Pre-fetched JD ($(wc -c <"$jd_file" 2>/dev/null || echo 0) bytes)"
-    node "$PROJECT_DIR/jd-intake.mjs" "$jd_file" --source "$intake_source" --url "$url" --out "$jd_record" --text-out "$jd_file" >>"$log_file" 2>&1 \
+    node "$PROJECT_DIR/jd-intake.mjs" "$jd_file" --source "$intake_source" --url "$url" "${intake_ref[@]}" --out "$jd_record" --text-out "$jd_file" >>"$log_file" 2>&1 \
       || { echo "    ⚠️  JD intake failed — worker will build the record itself"; rm -f "$jd_record"; }
   else
     echo "    ⚠️  JD pre-fetch failed — worker will WebFetch and build the record itself"
@@ -811,6 +815,20 @@ process_offer() {
     fi
 
     local done_note="-"
+    # A CV is only trusted when it was built during this job: the build runs the
+    # output guards and cv-verify. A worker that points the report at an older
+    # PDF ("reused, not rebuilt") bypasses both.
+    local report_pdf
+    report_pdf=$(sed -nE 's/^\*\*PDF:\*\*[[:space:]]*(output\/[^[:space:]]+\.pdf).*/\1/p' "$report_glob_found" 2>/dev/null | head -1 || true)
+    if [[ -n "$report_pdf" && -f "$PROJECT_DIR/$report_pdf" ]]; then
+      local pdf_epoch start_epoch
+      pdf_epoch=$(stat -c %Y "$PROJECT_DIR/$report_pdf" 2>/dev/null || echo 0)
+      start_epoch=$(date -d "$started_at" +%s 2>/dev/null || echo 0)
+      if (( start_epoch > 0 && pdf_epoch < start_epoch )); then
+        done_note="CV reused, not rebuilt: $report_pdf predates this job - regenerate with generate_cv"
+        echo "    ⚠️  $done_note"
+      fi
+    fi
     if [[ "$cv_mode" == "force" ]]; then
       local forced_pdf
       forced_pdf=$(sed -nE 's/^\*\*PDF:\*\*[[:space:]]*(output\/[^[:space:]]+\.pdf).*/\1/p' "$report_glob_found" 2>/dev/null | head -1 || true)

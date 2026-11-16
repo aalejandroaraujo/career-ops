@@ -17,7 +17,7 @@
  *
  * CLI:
  *   node output-guards.mjs check-cv <payload.json>      # titles + guards + language
- *   node output-guards.mjs check-text <file>              # guards only (letters, notes)
+ *   node output-guards.mjs check-text <file>              # guards + no volunteered gaps (letters, notes)
  * Exit 1 with the violations listed when anything fails.
  */
 
@@ -164,6 +164,39 @@ export function mapStrings(value, fn) {
   return value;
 }
 
+// ── written outreach: no volunteered gaps ────────────────────────────────────
+
+/**
+ * Confessional gap language. Said in person, in answer to a question ("I'd
+ * rather name that now than have you find it in week three"), it builds trust.
+ * Written unprompted in a cover letter, LinkedIn note, forwardable intro or
+ * form answer, it frames the candidate by what they lack before anyone has
+ * seen what they bring. Gaps live in the interview plan (Block F) and the
+ * first-call script, never in written outreach. (2026-11-16, Julius Baer.)
+ */
+export const CONFESSION_PATTERNS = [
+  /\b(?:rather|prefer to)\s+(?:name|tell you|say|flag|mention|state)\b[^.\n]{0,80}\b(?:than|before)\b/i,
+  /\bthan\s+(?:have|let)\s+you\s+(?:find|discover|notice|uncover)\b/i,
+  /\b(?:two|one|a few|some)\s+things?\s+I(?:'d|\s+would)?\s+(?:rather\s+)?(?:name|flag|mention|be upfront about)\b/i,
+  /\bI\s+(?:have\s+not|haven't|have\s+never|never|do\s+not\s+have|don't\s+have|lack)\b[^.\n]{0,60}\b(?:experience|worked|background|exposure|certifi\w*|domain|track record)\b/i,
+  /\bwould\s+be\s+(?:a\s+)?new\s+(?:domain|area|field|industry|sector)\s+(?:for|to)\s+me\b/i,
+  /\bnew\s+to\s+me\b/i,
+  /\bI(?:'d|\s+would|'ll|\s+will)\s+(?:sit|take|pursue|get|obtain|complete)\s+(?:the\s+)?[\w\s/-]{0,40}certification\s+(?:in|within)\s+my\s+first\b/i,
+  /\b(?:admittedly|full disclosure|to be (?:fully )?transparent|I must admit|my (?:main )?weakness)\b/i,
+  /\bich\s+habe\s+(?:noch\s+)?keine\s+(?:Erfahrung|Kenntnisse)\b/i,
+  /\bwäre\s+(?:ein\s+)?neu(?:es|er)?\s+\w*\s*für\s+mich\b/i,
+];
+
+/** Findings for confessional gap language in written outreach text. */
+export function confessionFindings(text) {
+  const out = [];
+  for (const re of CONFESSION_PATTERNS) {
+    const m = String(text || '').match(re);
+    if (m) out.push(`volunteered gap in written outreach: "${m[0].trim()}" — gaps belong in the interview plan and first-call script, not in a letter, note or form answer`);
+  }
+  return out;
+}
+
 // ── composed checks ──────────────────────────────────────────────────────────
 
 export function loadProfile(path = join(ROOT, 'config/profile.yml')) {
@@ -202,7 +235,7 @@ function main() {
   const raw = readFileSync(file, 'utf8');
   const errors = cmd === 'check-cv'
     ? checkCvPayload(JSON.parse(raw))
-    : checkGuards(raw, loadFactGuards(loadProfile()));
+    : [...checkGuards(raw, loadFactGuards(loadProfile())), ...confessionFindings(raw)];
   if (errors.length) { console.error(errors.map((e) => `✗ ${e}`).join('\n')); process.exit(1); }
   console.log('output guards: OK');
 }

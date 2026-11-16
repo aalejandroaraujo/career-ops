@@ -8,7 +8,7 @@
  *   - PDF metadata said "pdfTeX-1.40" / "LaTeX with hyperref" as Creator and
  *     Producer, so a recruiter's document viewer showed tooling, not the person.
  *   - a third page spilled from one long bullet (the layout budget is 2 pages);
- *   - a role showed "02/2026 - Present" instead of a dated range;
+ *   - a role showed "02/2026 - Present" (ongoing roles read "since MM/YYYY");
  *   - the photo sat flush against the right page edge.
  *
  * generate-latex.mjs runs verifyCvPdf() after every AltaCV compile and fails
@@ -28,6 +28,8 @@ import { pathToFileURL } from 'node:url';
 export const EXPECTED_PAGES = 2;
 /** Minimum gap between the photo's right edge and the page edge (A4 width 210mm). */
 export const MIN_PHOTO_RIGHT_MARGIN_MM = 15;
+/** Text must stay inside the 1cm page margin; allow ~3mm of slack for glyph overhang. */
+export const MIN_TEXT_RIGHT_MARGIN_PT = 20;
 
 // "02/2026 - Present", "2024 – heute", "seit 2023 - aktuell"
 export const OPEN_DATE_RANGE = /(?:\b\d{1,2}[./])?\b(?:19|20)\d{2}\s*[-–—]+\s*(present|current|now|today|heute|aktuell|jetzt|ongoing|actuel|aujourd'hui)\b/i;
@@ -56,7 +58,8 @@ export function unescapeLatex(s) {
 
 /** The candidate name from a filled AltaCV .tex (`\name{...}`). */
 export function nameFromTex(tex) {
-  const m = String(tex).match(/\\name\{((?:[^{}]|\{[^{}]*\})*)\}/);
+  const m = String(tex).match(/\\name\{((?:[^{}]|\{[^{}]*\})*)\}/)
+    || String(tex).match(/pdfauthor=\{((?:[^{}]|\{[^{}]*\})*)\}/);
   return m ? unescapeLatex(m[1]) : null;
 }
 
@@ -101,7 +104,7 @@ export function headerRightMarginMm(pgm, { pageWidthMm = 210, bandFraction = 0.2
 
 /**
  * @param {string} pdfPath
- * @param {{expectAuthor?:string|null, expectPages?:number, texPath?:string|null, expectPhoto?:boolean|null}} [opts]
+ * @param {{expectAuthor?:string|null, expectPages?:number, maxPages?:number, texPath?:string|null, expectPhoto?:boolean|null}} [opts]
  * @returns {{ok:boolean, skipped?:boolean, errors:string[], warnings:string[], checks:Record<string, any>}}
  */
 export function verifyCvPdf(pdfPath, opts = {}) {
@@ -128,7 +131,7 @@ export function verifyCvPdf(pdfPath, opts = {}) {
       }
       if (!info.Title || !info.Title.includes(expectAuthor)) errors.push(`PDF Title "${info.Title || ''}" does not carry the candidate name`);
     }
-    if (checks.pages !== expectPages) errors.push(`PDF has ${checks.pages} page(s), expected ${expectPages}`);
+    if (opts.maxPages ? checks.pages > opts.maxPages : checks.pages !== expectPages) errors.push(`PDF has ${checks.pages} page(s), expected ${opts.maxPages ? `at most ${opts.maxPages}` : expectPages}`);
   } else warnings.push('pdfinfo not installed (poppler-utils): metadata and page-count checks skipped');
 
   // 3. No open "- Present" date ranges in the rendered text
@@ -136,8 +139,24 @@ export function verifyCvPdf(pdfPath, opts = {}) {
     const text = execFileSync('pdftotext', ['-enc', 'UTF-8', pdfPath, '-'], { encoding: 'utf8' });
     const hit = text.match(OPEN_DATE_RANGE);
     checks.open_date_range = hit ? hit[0] : null;
-    if (hit) errors.push(`open date range "${hit[0]}" in the PDF: every role needs an end date (build-cv-altacv resolves "Present" to MM/YYYY)`);
+    if (hit) errors.push(`open date range "${hit[0]}" in the PDF: ongoing roles read "since MM/YYYY" (cv-format.mjs), closed roles need an end date`);
   } else warnings.push('pdftotext not installed: date-range check skipped');
+
+  // 3b. Nothing runs into the right margin (a long skill tag once ran off
+  // the page: "Azure (Functions, … Entra ID, AP" with the rest cut).
+  if (tool('pdftotext')) {
+    const bbox = execFileSync('pdftotext', ['-bbox', pdfPath, '-'], { encoding: 'utf8', maxBuffer: 32 << 20 });
+    const overflow = [];
+    let width = 0; let page = 0;
+    for (const line of bbox.split('\n')) {
+      const pm = line.match(/<page width="([\d.]+)"/);
+      if (pm) { width = Number(pm[1]); page++; continue; }
+      const wm = line.match(/<word xMin="[\d.]+" yMin="[\d.]+" xMax="([\d.]+)" yMax="[\d.]+">([^<]*)<\/word>/);
+      if (wm && width && Number(wm[1]) > width - MIN_TEXT_RIGHT_MARGIN_PT) overflow.push(`p${page} "${wm[2]}"`);
+    }
+    checks.text_overflow = overflow.slice(0, 5);
+    if (overflow.length) errors.push(`text runs into the right margin or off the page: ${overflow.slice(0, 4).join(', ')} — shorten that line or tag`);
+  }
 
   // 4. Photo keeps a right margin
   if (expectPhoto === false) checks.photo_right_margin_mm = 'no photo';

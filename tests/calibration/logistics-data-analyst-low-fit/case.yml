@@ -1,0 +1,14 @@
+name: logistics-data-analyst-low-fit
+note: A great deal (comp, culture, low risk) must never rescue a low-fit role.
+context: fixture
+jd: jd.md
+report: report.md
+expect:
+  record:
+    employment_type: direct_hire
+    channel: company_ats
+  fit_score: 2.3
+  decision: skip
+  priority: high
+  next_action_first: "Do not apply"
+history: []

@@ -9,7 +9,7 @@
 
 import {
   BVG, compScoreFromTotal, domainGapIndustry, profileIndustries, targetBand, totalComp,
-  THRESHOLDS, candidateLanguageLevel, decide, dealScore, enforceReport, fitScore, isForbiddenNextAction,
+  THRESHOLDS, writtenOutreachText, candidateLanguageLevel, decide, dealScore, enforceReport, fitScore, isForbiddenNextAction,
   languageGap, levelGap, levelRank, nextActionPlan, patchTsv, priorityOf, readSummary, requiredLanguageLevel,
 } from './evaluation-rules.mjs';
 
@@ -165,15 +165,53 @@ eq(tc.total, { min: 115000 + 9200 + tc.pension_delta.min, max: 135000 + 10800 + 
 eq(tc.mobile_office, 'yes', 'mobile office stated');
 eq(tc.assumptions.length, 2, 'every inferred number is listed as an assumption');
 eq(totalComp({ min: 100000, max: 100000 }, {}, { age: 40 }).total, { min: 100000, max: 100000 }, 'no benefits → total = base');
-eq(targetBand({ compensation: { target_range: 'CHF 150K–230K total (FTE)' } }), { min: 150000, max: 230000, basis: 'total' }, 'target band parsed from profile');
-const band = { min: 150000, max: 230000 };
-eq([compScoreFromTotal({ min: 240000, max: 260000 }, band), compScoreFromTotal({ min: 195000, max: 215000 }, band), compScoreFromTotal({ min: 150000, max: 170000 }, band), compScoreFromTotal({ min: 130000, max: 145000 }, band)], [5, 4.5, 3.5, 2.5], 'comp scored on total vs band');
-const compReport = report.replace('next_action:', 'comp:\n  base_min: 115000\n  base_max: 135000\nnext_action:').replace('| Comp | 2.5/5 |', '| Comp | 3.5/5 |');
-const ce = enforceReport(compReport, { record: { ...directHire, benefits: { bonus: 'Bonus', pension_employer_share: 60 } }, profile: { ...profile, compensation: { target_range: 'CHF 150K–230K total (FTE)' }, candidate: { ...profile.candidate, birthyear: 1976 } } });
+eq(targetBand({ compensation: { target_range: 'CHF 120K–180K total (FTE)' } }), { min: 120000, max: 180000, basis: 'total' }, 'target band parsed from profile');
+const band = { min: 120000, max: 180000 };
+eq([compScoreFromTotal({ min: 190000, max: 200000 }, band), compScoreFromTotal({ min: 155000, max: 165000 }, band), compScoreFromTotal({ min: 125000, max: 135000 }, band), compScoreFromTotal({ min: 110000, max: 118000 }, band)], [5, 4.5, 3.5, 2.5], 'comp scored on total vs band');
+const compReport = report.replace('next_action:', 'comp:\n  base_min: 115000\n  base_max: 135000\nnext_action:').replace('| Comp | 2.5/5 |', '| Comp | 2.0/5 |');
+const ce = enforceReport(compReport, { record: { ...directHire, benefits: { bonus: 'Bonus', pension_employer_share: 60 } }, profile: { ...profile, compensation: { target_range: 'CHF 120K–180K total (FTE)' }, candidate: { ...profile.candidate, birthyear: 1980 } } });
 const cs = readSummary(ce.md);
-ok(cs.comp.total_min > cs.comp.base_min && cs.comp.target_min === 150000, 'summary carries base and total separately, with the target band');
+ok(cs.comp.total_min > cs.comp.base_min && cs.comp.target_min === 120000, 'summary carries base and total separately, with the target band');
 ok(ce.result.corrections.some((c) => /scored on total comp/.test(c)), 'comp dimension re-scored on total, not base');
 eq(ce.result.decision, 'apply', 'comp never changes the decision');
+
+console.log('\n9. Non-gaps');
+const ng = enforceReport(report.replace('  - "German B1 against a German JD"', '  - "German B1 against a German JD"\n  - "Overqualified / age-band read: not applicable here"'), { record: directHire, profile: { ...profile, candidate: { level: 'Engineer' } } });
+ok(!readSummary(ng.md).soft_gaps.some((g) => /not applicable/.test(g)), 'a soft gap that says "not applicable" is removed');
+
+console.log('\n10. Referral path');
+const refRecord = { ...directHire, channel: 'referral', referral: { role: 'executive assistant in IT', name: null, kind: 'warm_intro' } };
+const rp = nextActionPlan(refRecord, 'consider');
+eq(rp.map((p) => p.kind), ['brief_referrer', 'introduction', 'ask_insider', 'apply', 'thank_referrer', 'first_call'], 'referral: brief → introduction → insider questions → apply → thank → first call');
+ok(rp.findIndex((p) => p.kind === 'brief_referrer') < rp.findIndex((p) => p.kind === 'apply'), 'the introduction comes before the application');
+ok(!rp.some((p) => p.kind === 'linkedin_note'), 'no cold LinkedIn note on the referral path');
+eq(nextActionPlan(refRecord, 'skip').map((p) => p.kind), ['none'], 'a referral does not rescue a skip');
+const re = enforceReport(report, { record: refRecord, profile });
+ok(/^Brief your contact \(executive assistant in IT\)/.test(readSummary(re.md).next_action[0]), 'enforce rewrites next_action for the referral path');
+const unk = enforceReport(report.replace('final_decision: "Consider"', 'final_decision: "Consider"\nemployment_type: "direct_hire"'), { record: { ...directHire, employment_type: 'unknown' }, profile });
+eq(readSummary(unk.md).employment_type, 'direct_hire', 'a worker correction survives when the parser said unknown');
+
+console.log('\n11. Ready-to-paste texts are linted, spoken answers are not');
+const withOutreach = `${report}
+## Next action (checklist)
+
+1. [ ] Apply
+
+### Cover letter
+> Two things I would rather name than have you find. I have not worked inside a SAFe ART.
+
+### First-call script
+> "I'd rather name that now than have you discover it in week three."
+
+## F) Interview Plan
+| Q | "I'd rather name that now than have you find it." |
+`;
+ok(!/First-call script|Interview Plan/.test(writtenOutreachText(withOutreach)), 'first-call script and Block F are excluded from written outreach');
+const wo = enforceReport(withOutreach, { record: directHire, profile });
+ok((readSummary(wo.md).outreach_issues || []).length > 0, 'volunteered gaps in the letter are flagged');
+const spokenOnly = enforceReport(withOutreach.replace(/> Two things[^\n]*/, '> I designed and built the platform end to end.'), { record: directHire, profile });
+ok(!readSummary(spokenOnly.md).outreach_issues, 'the same phrasing in the first-call script and Block F is not flagged');
+ok(wo.result.corrections.some((c) => /ready-to-paste text: volunteered gap/.test(c)), 'reported as corrections');
 
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

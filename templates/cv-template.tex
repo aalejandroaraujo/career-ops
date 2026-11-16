@@ -43,6 +43,8 @@
 }{}{0em}{}[\color{black}\titlerule \vspace{0pt}]
 % Ensure that generate pdf is machine readable/ATS parsable
 \pdfgentounicode=1
+% PDF metadata: the candidate, not the toolchain (cv-verify.mjs asserts it).
+\hypersetup{unicode,pdfauthor={{{PDF_AUTHOR}}},pdfcreator={{{PDF_AUTHOR}}},pdfproducer={{{PDF_AUTHOR}}},pdftitle={{{PDF_TITLE}}}}
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%  Commands  %%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \newcommand{\resumeItem}[1]{

@@ -123,17 +123,19 @@ Wait for confirmation or corrections before proceeding.
 
 ## Step 5 — Gap detection and conversation
 
-Parse the JD for potential gaps between the candidate's profile and the role. For each gap detected, ask directly — do not auto-insert any standard language:
+Parse the JD for potential gaps between the candidate's profile and the role.
+
+**Default: the letter does not mention gaps.** A letter's job is to earn the conversation; volunteering what the candidate lacks frames them by it before anyone has seen what they bring. Gap handling belongs in the interview plan (Block F) and the first-call script, where it is an answer to a question. Never write confessional framing ("I'd rather name that now than have you find it", "X would be a new domain for me", "I'd take the certification in my first quarter"); `generate-cover-letter.mjs` rejects it. The only exceptions: a stated language level (once, from `language_learning`), and a factual availability / notice-period line. When running without the user (batch / auto-pipeline), apply the default and do not ask.
+
+In an interactive session, show the gaps you found and confirm the default, asking only where the user may want an exception:
 
 ```text
 I spotted potential gaps between your profile and this JD:
 
 [Gap: domain mismatch]
 The JD is in {JD domain} — your background is in {primary_domain}.
-→ How do you want to handle this?
-  a) Address it directly and briefly in the letter
-  b) Don't mention it — let the application speak for itself
-  c) Tell me your angle and I'll write it your way
+→ Default: not mentioned in the letter (prepared as an interview answer instead).
+  Say if you want a different angle, framed as what you bring, never as what you lack.
 
 [Gap: immediate start]
 The JD asks for an immediate start. Your profile shows a {notice_period_days}-day notice period.
@@ -146,7 +148,7 @@ The JD requires {language} at {level}. Where are you with {language}?
 
 [Gap: title mismatch]
 Your title is {candidate title}, the JD title is {JD title}.
-→ Do you want to address this? Or let the scope speak for itself?
+→ Default: let the scope speak for itself.
 ```
 
 Only prompt for gaps that are actually present. If there are no gaps, skip this step and say so.

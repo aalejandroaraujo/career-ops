@@ -1,0 +1,37 @@
+name: acme-insurer-platform-engineer
+note: >-
+  Synthetic analog of a direct-hire insurer posting that a single global score
+  marked "Consider" (3.4) despite a 4.5 CV match: comp on base alone, a domain
+  gap the profile contradicts, and a pre-application email in next_action.
+context: fixture
+jd: jd.md
+url: https://jobs.acme.example/offene-stellen/platform-engineer-ai
+report: report.md
+cv: cv-payload.json
+expect:
+  record:
+    employment_type: direct_hire
+    channel: company_ats
+    language: de
+    apply_control_present: true
+  fit_score: 4.5
+  decision: apply
+  priority: medium
+  hard_stops: none
+  next_action_first: ^Apply via the company ATS
+  report_required:
+    - "## Fit vs Deal"
+    - "Decision: APPLY"
+    - "Overqualified / age-band read"
+    - "total_min:"
+  report_forbidden:
+    - "No financial-services domain"
+    - "apply only if"
+  cv_required:
+    - "production"
+    - "builder role on purpose"
+  cv_forbidden:
+    - "Example Grid AG"
+    - "Platform Engineer & Lab Author"
+  cv_first_achievement: "production"
+history: []

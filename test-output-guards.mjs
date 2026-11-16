@@ -11,7 +11,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
-  canonicalRoles, checkCvLanguage, checkCvPayload, checkGuards, checkRoleTitles, loadFactGuards, mapStrings, swissSpelling,
+  canonicalRoles, checkCvLanguage, confessionFindings, checkCvPayload, checkGuards, checkRoleTitles, loadFactGuards, mapStrings, swissSpelling,
 } from './output-guards.mjs';
 
 let passed = 0;
@@ -105,6 +105,31 @@ let code = 0; let err = '';
 try { execFileSync(process.execPath, ['build-cv-altacv.mjs', bad, join(tmp, 'bad.tex')], { stdio: 'pipe' }); } catch (e) { code = e.status; err = String(e.stderr); }
 ok(code === 1 && /rejected by output guards/.test(err), 'build-cv-altacv.mjs exits 1 before rendering', err.slice(0, 120));
 rmSync(tmp, { recursive: true, force: true });
+
+console.log('\n7. Written outreach never volunteers a gap');
+for (const t of [
+  'Two things I would rather name than have you find.',
+  "I'd rather tell you that now than have it surface in week three.",
+  'I have not worked inside a SAFe Agile Release Train.',
+  'And wealth management would be a new domain for me.',
+  'I would sit the SAFe for Architects certification in my first quarter.',
+  'Admittedly, banking is new to me.',
+  'Ich habe noch keine Erfahrung mit SAFe.',
+]) ok(confessionFindings(t).length > 0, `flagged: "${t}"`);
+for (const t of [
+  'Not yet inside an ART; I have delivered in Scrum as a certified Scrum Master and Product Owner.',
+  'I designed and built the platform end to end as technical lead.',
+  'Ich spreche Deutsch auf Niveau B1 und arbeite aktiv auf B2 hin.',
+  'I can start immediately; I have no notice period to serve.',
+]) ok(confessionFindings(t).length === 0, `not flagged: "${t}"`);
+
+const tmp2 = mkdtempSync(join(tmpdir(), 'cover-guard-'));
+const letterPath = join(tmp2, 'letter.json');
+writeFileSync(letterPath, JSON.stringify({ candidate: { name: 'Test Candidate' }, letter: { role_title: 'Architect', company: 'Acme', opening: 'I am applying.', profile_intro: 'Two things I would rather name than have you find: I have not worked inside a SAFe ART.' } }));
+let coverCode = 0; let coverErr = '';
+try { execFileSync(process.execPath, ['generate-cover-letter.mjs', '--payload', letterPath], { stdio: 'pipe' }); } catch (e) { coverCode = e.status; coverErr = String(e.stderr); }
+ok(coverCode === 1 && /volunteered gap/.test(coverErr), 'generate-cover-letter.mjs refuses a letter that volunteers gaps', coverErr.slice(0, 120));
+rmSync(tmp2, { recursive: true, force: true });
 
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 
+import { checkCvPayload } from './output-guards.mjs';
+import { formatDateRange } from './cv-format.mjs';
 import { readFile, writeFile, stat } from 'fs/promises';
 import { existsSync } from 'fs';
 import { resolve, dirname, basename, join } from 'path';
@@ -76,8 +78,11 @@ function buildExperience(entries) {
   const blocks = [];
   for (const e of entries) {
     if (!e) continue;
-    const bullets = Array.isArray(e.bullets) ? e.bullets.map(b => `            \\resumeItem{${escapeLatex(b)}}`).join('\n') : '';
-    blocks.push(`    \\resumeSubheading\n      {${escapeLatex(e.company)}}{${escapeLatex(e.dates)}}\n      {${escapeLatex(e.role)}}{${escapeLatex(e.location)}}\n      \\resumeItemListStart\n${bullets}\n      \\resumeItemListEnd`);
+    const bullets = Array.isArray(e.bullets) ? e.bullets.filter(Boolean).map(b => `            \\resumeItem{${escapeLatex(b)}}`).join('\n') : '';
+    // An earlier role listed without bullets must not open an empty list
+    // ("Something's wrong--perhaps a missing \\item" aborts the compile).
+    const list = bullets ? `\n      \\resumeItemListStart\n${bullets}\n      \\resumeItemListEnd` : '';
+    blocks.push(`    \\resumeSubheading\n      {${escapeLatex(e.company)}}{${escapeLatex(formatDateRange(e.dates))}}\n      {${escapeLatex(e.role)}}{${escapeLatex(e.location)}}${list}`);
   }
   return blocks.join('\n\n');
 }
@@ -143,6 +148,14 @@ async function main() {
     process.exit(1);
   }
 
+  // Same output guards as the AltaCV builder: truthful titles, guarded facts,
+  // English CV. The ATS copy carries the same claims as the human copy.
+  const guardErrors = checkCvPayload(payload);
+  if (guardErrors.length) {
+    console.error(`CV payload rejected by output guards:\n${guardErrors.map((e) => `  ✗ ${e}`).join('\n')}`);
+    process.exit(1);
+  }
+
   if (!existsSync(TEMPLATE_PATH)) {
     console.error(`Template not found: ${TEMPLATE_PATH}`);
     process.exit(1);
@@ -159,6 +172,8 @@ async function main() {
 
   const substitutions = {
     NAME: escapeLatex(payload.name || ''),
+    PDF_AUTHOR: escapeLatex(payload.name || ''),
+    PDF_TITLE: escapeLatex([payload.name, payload.tagline || payload.title].filter(Boolean).join(' | ')),
     CONTACT_LINE: escapeLatex(payload.contact_line || ''),
     EMAIL_URL: emailUrl,
     EMAIL_DISPLAY: escapeLatex(emailDisplay),
@@ -278,6 +293,8 @@ async function runSelfTest() {
 
   const substitutions = {
     NAME: escapeLatex(sample.name),
+    PDF_AUTHOR: escapeLatex(sample.name || ''),
+    PDF_TITLE: escapeLatex(sample.name || ''),
     CONTACT_LINE: escapeLatex(sample.contact_line),
     EMAIL_URL: emailUrl,
     EMAIL_DISPLAY: escapeLatex(emailDisplay),
