@@ -8,7 +8,7 @@
  *   - PDF metadata said "pdfTeX-1.40" / "LaTeX with hyperref" as Creator and
  *     Producer, so a recruiter's document viewer showed tooling, not the person.
  *   - a third page spilled from one long bullet (the layout budget is 2 pages);
- *   - a role showed "02/2026 - Present" instead of a dated range;
+ *   - a role showed "02/2026 - Present" (ongoing roles read "since MM/YYYY");
  *   - the photo sat flush against the right page edge.
  *
  * generate-latex.mjs runs verifyCvPdf() after every AltaCV compile and fails
@@ -58,7 +58,8 @@ export function unescapeLatex(s) {
 
 /** The candidate name from a filled AltaCV .tex (`\name{...}`). */
 export function nameFromTex(tex) {
-  const m = String(tex).match(/\\name\{((?:[^{}]|\{[^{}]*\})*)\}/);
+  const m = String(tex).match(/\\name\{((?:[^{}]|\{[^{}]*\})*)\}/)
+    || String(tex).match(/pdfauthor=\{((?:[^{}]|\{[^{}]*\})*)\}/);
   return m ? unescapeLatex(m[1]) : null;
 }
 
@@ -103,7 +104,7 @@ export function headerRightMarginMm(pgm, { pageWidthMm = 210, bandFraction = 0.2
 
 /**
  * @param {string} pdfPath
- * @param {{expectAuthor?:string|null, expectPages?:number, texPath?:string|null, expectPhoto?:boolean|null}} [opts]
+ * @param {{expectAuthor?:string|null, expectPages?:number, maxPages?:number, texPath?:string|null, expectPhoto?:boolean|null}} [opts]
  * @returns {{ok:boolean, skipped?:boolean, errors:string[], warnings:string[], checks:Record<string, any>}}
  */
 export function verifyCvPdf(pdfPath, opts = {}) {
@@ -130,7 +131,7 @@ export function verifyCvPdf(pdfPath, opts = {}) {
       }
       if (!info.Title || !info.Title.includes(expectAuthor)) errors.push(`PDF Title "${info.Title || ''}" does not carry the candidate name`);
     }
-    if (checks.pages !== expectPages) errors.push(`PDF has ${checks.pages} page(s), expected ${expectPages}`);
+    if (opts.maxPages ? checks.pages > opts.maxPages : checks.pages !== expectPages) errors.push(`PDF has ${checks.pages} page(s), expected ${opts.maxPages ? `at most ${opts.maxPages}` : expectPages}`);
   } else warnings.push('pdfinfo not installed (poppler-utils): metadata and page-count checks skipped');
 
   // 3. No open "- Present" date ranges in the rendered text
@@ -138,7 +139,7 @@ export function verifyCvPdf(pdfPath, opts = {}) {
     const text = execFileSync('pdftotext', ['-enc', 'UTF-8', pdfPath, '-'], { encoding: 'utf8' });
     const hit = text.match(OPEN_DATE_RANGE);
     checks.open_date_range = hit ? hit[0] : null;
-    if (hit) errors.push(`open date range "${hit[0]}" in the PDF: every role needs an end date (build-cv-altacv resolves "Present" to MM/YYYY)`);
+    if (hit) errors.push(`open date range "${hit[0]}" in the PDF: ongoing roles read "since MM/YYYY" (cv-format.mjs), closed roles need an end date`);
   } else warnings.push('pdftotext not installed: date-range check skipped');
 
   // 3b. Nothing runs into the right margin (a long skill tag once ran off

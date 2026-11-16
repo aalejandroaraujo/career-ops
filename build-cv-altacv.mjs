@@ -19,6 +19,7 @@
  */
 
 import { checkCvPayload } from './output-guards.mjs';
+import { formatDateRange } from './cv-format.mjs';
 import { readFile, writeFile, stat, copyFile, mkdir } from 'fs/promises';
 import { existsSync, readFileSync } from 'fs';
 import { resolve, dirname, basename, extname, join } from 'path';
@@ -122,14 +123,9 @@ function linked(label, url) {
   return href ? `\\href{${href}}{${text}}` : text;
 }
 
-// Replace "Present"/"present" in a date range with the current MM/YYYY at
-// generation time (e.g. "02/2026 - Present" → "02/2026 - 07/2026").
-function resolvePresent(dates) {
-  if (typeof dates !== 'string') return dates ? String(dates) : '';
-  const now = new Date();
-  const mm = String(now.getMonth() + 1).padStart(2, '0');
-  return dates.replace(/present/gi, `${mm}/${now.getFullYear()}`);
-}
+// Ongoing roles render as "since MM/YYYY" (cv-format.mjs): never "Present",
+// never the current month as an end date.
+const resolvePresent = formatDateRange;
 
 // ── section builders ─────────────────────────────────────────────────────────
 

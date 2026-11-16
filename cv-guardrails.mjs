@@ -55,6 +55,14 @@ function profileValue(raw, key) {
   return v;
 }
 
+/** Plain-text presence of a personal detail (single-column CV contact line). */
+function plainTextPresent(tex, key, value) {
+  const t = tex.replace(/\\[a-zA-Z]+|[{}]/g, ' ');
+  if (key === 'children') return new RegExp(`\\b${value}\\s+(children|kids|Kinder)\\b`, 'i').test(t);
+  if (key === 'residence_permit') return new RegExp(`\\b(permit|Bewilligung|Ausweis)\\s+${value}\\b`, 'i').test(t);
+  return new RegExp(`\\b${value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i').test(t);
+}
+
 function newestTex() {
   if (!existsSync(OUTPUT_DIR)) return null;
   const files = readdirSync(OUTPUT_DIR)
@@ -83,7 +91,8 @@ function newestTex() {
 const BUILD_INVOCATION = /(?:^|[\s;&|(])node\s+(?:["']?[^\s"';|&]*\/)?build-cv-altacv\.mjs["']?\s/;
 
 export function isBuildCommand(command) {
-  return typeof command === 'string' && BUILD_INVOCATION.test(command);
+  // "--test" runs the builder's self-test into /tmp; nothing in output/ changed.
+  return typeof command === 'string' && BUILD_INVOCATION.test(command) && !/build-cv-altacv\.mjs["']?\s+--test\b/.test(command);
 }
 
 export function texFromCommand(command) {
@@ -143,6 +152,9 @@ function main() {
     const value = profileValue(profile, f.profileKey);
     if (!value) continue;                 // profile doesn't set it -> not expected
     if (tex.includes(f.marker)) continue; // present -> fine
+    // The single-column ATS CV (build-cv-latex.mjs) has no icon macros; it
+    // carries the details as plain text in its contact line.
+    if (!/\\documentclass[^{]*\{altacv\}/.test(tex) && plainTextPresent(tex, f.profileKey, value)) continue;
     (f.required ? missingRequired : missingOptional).push(`${f.label} ("${value}")`);
   }
 

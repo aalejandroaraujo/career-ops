@@ -130,10 +130,11 @@ After every AltaCV compile:
 
 - PDF Author, Creator and Producer are the candidate's name, and the Title carries it;
 - exactly 2 pages;
-- no "– Present" date ranges;
+- no "– Present" date ranges (an ongoing role reads "since MM/YYYY");
+- no text running into the right margin or off the page;
 - the photo keeps a right margin.
 
-A failed check fails the build. Fix the payload, then rebuild.
+The single-column ATS CV gets the same checks (at most 2 pages, no photo check), and both builders run the output guards (truthful titles, guarded facts, English CV). A failed check fails the build. Fix the payload, then rebuild.
 
 ## 9b. Judge the CV as its readers will
 

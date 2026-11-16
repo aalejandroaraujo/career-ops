@@ -567,6 +567,9 @@ orchestrator flags a report whose PDF is older than the job as "CV reused".
    of things *shipped to and run in production* ABOVE evaluation, benchmark or demo
    metrics: in the About block's proof sentence, in Key Achievements (first item),
    and in the first bullet of each role.
+   **Dates:** pass each role's dates from cv.md verbatim ("01/2024 - Present");
+   the builders render an ongoing role as "since 01/2024". Never pre-resolve
+   "Present" to the current month.
    **Truthful titles:** `experience[].role` and `previous_experience[].role` are
    copied from cv.md unchanged (the bold line under each employer). Never rename a
    role to match JD keywords. Consecutive roles at one employer may share an entry

@@ -17,6 +17,7 @@ import {
 } from './cv-verify.mjs';
 import { APPLY_TEXT_PATTERNS, classifyLiveness } from './liveness-core.mjs';
 import { isBuildCommand, texFromCommand } from './cv-guardrails.mjs';
+import { formatDateRange, isOpenRange } from './cv-format.mjs';
 
 let passed = 0;
 let failed = 0;
@@ -92,6 +93,19 @@ ok(isBuildCommand('cd /app && node /app/build-cv-altacv.mjs a.json o.tex && node
 ok(!isBuildCommand('git commit -m "build-cv-altacv.mjs now fills templates/cv-altacv.tex"'), 'commit message naming the builder does not trigger');
 ok(!isBuildCommand('grep -n photo build-cv-altacv.mjs'), 'grep over the builder does not trigger');
 eq(texFromCommand('cd /app && node /app/build-cv-altacv.mjs a.json o.tex'), '/app/o.tex', 'output .tex resolved against the cd target');
+
+console.log('\n5. Rules shared by both CV builders');
+ok(formatDateRange('01/2024 - Present') === 'since 01/2024', 'ongoing role → "since MM/YYYY"');
+ok(formatDateRange('2024 – heute') === 'since 2024', 'German "heute" handled');
+ok(formatDateRange('09/2023 - 02/2026') === '09/2023 - 02/2026', 'closed range unchanged');
+ok(!isOpenRange(formatDateRange('01/2024 - Present')), 'formatted ongoing role is not an open range for cv-verify');
+ok(!OPEN_DATE_RANGE.test('since 01/2024'), 'cv-verify accepts "since 01/2024"');
+ok(!isBuildCommand('node build-cv-altacv.mjs --test'), 'the builder self-test is not a CV build for the guardrail hook');
+const classicTpl = readFileSync('templates/cv-template.tex', 'utf8');
+ok(/pdfauthor=\{\{\{PDF_AUTHOR\}\}\}/.test(classicTpl), 'single-column template sets PDF metadata from the payload');
+const classicSrc = readFileSync('build-cv-latex.mjs', 'utf8');
+ok(/checkCvPayload\(payload\)/.test(classicSrc) && /formatDateRange\(e\.dates\)/.test(classicSrc), 'single-column builder runs the output guards and formats dates');
+ok(/maxPages: 2/.test(readFileSync('generate-latex.mjs', 'utf8')), 'generate-latex verifies the single-column CV too');
 
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

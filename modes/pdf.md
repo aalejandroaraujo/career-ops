@@ -133,7 +133,7 @@ These match the scripts' own usage strings:
   at least 15mm from the right page edge. On `false` the script exits non-zero; read
   `verification.errors` and fix the PAYLOAD, then rebuild (max 2 retries):
   3 pages → cut the weakest bullet or achievement detail; 1 page → restore the bullets
-  you cut; open date range → give the role an end date (never write "Present");
+  you cut; open date range → pass the cv.md dates verbatim, the builder renders an ongoing role as "since MM/YYYY" (never "Present");
   metadata → the payload `name` must be `config/profile.yml` `full_name`.
   `null` means poppler-utils is missing (rebuild the container); nothing was checked.
 - Expect `engine: "pdflatex"` for AltaCV (deliberate — the tectonic/XeTeX branch needs
